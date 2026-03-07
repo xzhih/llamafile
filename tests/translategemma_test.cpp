@@ -76,10 +76,25 @@ TEST(parse_rejects_missing_target_lang) {
     ASSERT_STR_EQ(std::string("missing required flag --target-lang"), error, "error message should be stable");
 }
 
+TEST(parse_translate_messages_json_args) {
+    char prog[] = "llamafile";
+    char flag1[] = "--translate-messages-json";
+    char payload[] = "[{\"role\":\"user\",\"content\":\"hello\"}]";
+    char *argv[] = {prog, flag1, payload, nullptr};
+    TranslateGemmaOptions opts;
+    std::string error;
+    ASSERT_TRUE(parse_translategemma_options(3, argv, &opts, &error), "messages json args should parse");
+    ASSERT_TRUE(opts.enabled, "messages json should enable translate mode");
+    ASSERT_FALSE(opts.image_mode, "messages json should not force legacy image mode");
+    ASSERT_STR_EQ(std::string(payload), opts.messages_json, "messages json payload should be captured");
+}
+
 TEST(build_text_prompt) {
     auto prompt = build_translategemma_text_prompt("en", "zh-CN", "Hello world");
     ASSERT_STR_EQ(
-        std::string("Translate from en to zh-CN. Preserve line breaks when possible.\n\nHello world"),
+        std::string("You are a professional English (en) to Chinese (zh-CN) translator. Your goal is to accurately convey the meaning and nuances of the original English text while adhering to Chinese grammar, vocabulary, and cultural sensitivities.\n"
+                    "Output plain translated text only. Do not output HTML, XML, Markdown, or any tags like <...>.\n"
+                    "Produce only the Chinese translation, without any additional explanations or commentary. Please translate the following English text into Chinese:\n\n\nHello world"),
         prompt,
         "text prompt should match expected template");
 }
@@ -87,13 +102,15 @@ TEST(build_text_prompt) {
 TEST(build_image_prompt) {
     auto prompt = build_translategemma_image_prompt("en", "zh-CN");
     ASSERT_STR_EQ(
-        std::string("Extract and translate all text in this image from en to zh-CN. Return only the translated text. Do not repeat the source text. Ignore icons, symbols, arrows, and non-text visual elements."),
+        std::string("You are a professional English (en) to Chinese (zh-CN) translator. Your goal is to accurately convey the meaning and nuances of the original English text while adhering to Chinese grammar, vocabulary, and cultural sensitivities.\n"
+                    "Output plain translated text only. Do not output HTML, XML, Markdown, or any tags like <...>.\n"
+                    "Please translate the English text in the provided image into Chinese. Produce only the Chinese translation, without any additional explanations, alternatives or commentary. Focus only on the text, do not output where the text is located, surrounding objects or any other explanation about the picture. Ignore symbols, pictogram, and arrows!\n\n\n"),
         prompt,
         "image prompt should match expected template");
 }
 
 TEST(sanitize_output) {
-    auto output = sanitize_translategemma_output("Hello\n<start_of_image>\n");
+    auto output = sanitize_translategemma_output("<start_of_turn>model\nHello\n<|file_separator|>\n<end_of_turn>\n");
     ASSERT_STR_EQ(std::string("Hello"), output, "output sanitizer should remove multimodal marker");
 }
 
