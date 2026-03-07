@@ -31,6 +31,7 @@
 
 #include "chatbot.h"
 #include "llamafile.h"
+#include <cstdio>
 #include <iostream>
 #include <set>
 #include <string>
@@ -38,9 +39,6 @@
 #ifdef COSMOCC
 #include <cosmo.h>
 #endif
-
-// Forward declaration for server main (defined in llama.cpp/tools/server/server.cpp)
-extern int server_main(int argc, char **argv);
 
 enum Program {
     PROG_UNKNOWN,
@@ -101,6 +99,12 @@ int main(int argc, char **argv) {
     // Load arguments from zip file if present (for bundled llamafiles)
     argc = cosmo_args("/zip/.args", &argv);
 
+    std::string translate_error;
+    if (!lf::chatbot::parse_translategemma_options(argc, argv, &lf::chatbot::g_translate_options, &translate_error)) {
+        std::fprintf(stderr, "error: %s\n", translate_error.c_str());
+        return 64;
+    }
+
     // Check GPU flags early to determine if we should load GPU support
     // This must be called BEFORE llamafile_has_metal() etc.
     llamafile_early_gpu_init(argv);
@@ -116,12 +120,12 @@ int main(int argc, char **argv) {
     // (first set: flags, second set: arguments with params)
     argc = removeArgs(argc, argv, 
                     {"--server"},
-                    {"--gpu"}
+                    {"--gpu", "--translate-text", "--translate-image", "--source-lang", "--target-lang"}
                     );
 
-    // Server mode: run HTTP server
     if (prog == PROG_SERVER) {
-        return server_main(argc, argv);
+        std::fprintf(stderr, "error: --server is not implemented in this TranslateGemma prototype build\n");
+        return 65;
     }
 
     // Chat mode (explicit --chat or default when no -p/-f/--random-prompt)

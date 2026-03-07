@@ -95,6 +95,32 @@ The code has been updated to use the new llama.cpp API:
 
 2. **Server Integration**: The background server feature is not yet implemented. Use the llama.cpp server separately for now.
 
+3. **Apple Metal in APE TUI Build**: In this prototype branch, the `o//llamafile/llamafile` APE TUI build can exit during GPU model loading on macOS. As a temporary workaround, run translation through a native `llama-server` binary.
+
+4. **Metal cache compatibility**: If you switch between builds that share the same llamafile version directory, stale `ggml-metal.dylib` cache can cause startup crashes. This prototype now uses a bumped version namespace (`0.10.1-dev`) to avoid cache collisions with earlier `0.10.0` experiments.
+
+### Temporary GPU Workaround (Text Translation)
+
+Use the helper script below, which starts `llama-server` with:
+
+- `--no-jinja`
+- `--chat-template chatml`
+- GPU offload enabled (`-ngl 999` by default)
+
+```sh
+./tools/translategemma_gpu_translate.sh \
+  --model /tmp/tgpublisher-models/translategemma-4b-it.Q2_K.gguf \
+  --source-lang en \
+  --target-lang zh \
+  --text "Hello world"
+```
+
+If your `llama-server` is not in `/tmp/llama-old-build/bin/llama-server` or `/tmp/llama.cpp-build/bin/llama-server`, set:
+
+```sh
+LLAMA_SERVER_BIN=/absolute/path/to/llama-server
+```
+
 ## Cosmopolitan FLAG System
 
 The code uses Cosmopolitan's FLAG system for configuration. This is a global variable system where flags are declared in `llamafile.h` and parsed at startup.

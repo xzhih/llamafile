@@ -26,7 +26,7 @@ LLAMAFILE_HDRS := \
 
 LLAMAFILE_VERSION_MAJOR := 0
 LLAMAFILE_VERSION_MINOR := 10
-LLAMAFILE_VERSION_PATCH := 0
+LLAMAFILE_VERSION_PATCH := 1
 LLAMAFILE_VERSION_STRING := $(LLAMAFILE_VERSION_MAJOR).$(LLAMAFILE_VERSION_MINOR).$(LLAMAFILE_VERSION_PATCH)-dev
 
 # ==============================================================================
@@ -142,6 +142,8 @@ LLAMAFILE_SRCS_CPP := \
 	llamafile/image.cpp \
 	llamafile/llama.cpp \
 	llamafile/string.cpp \
+	llamafile/translategemma.cpp \
+	llamafile/translategemma_mode.cpp \
 	llamafile/xterm.cpp \
 	$(LLAMAFILE_HIGHLIGHT_SRCS)
 
@@ -292,7 +294,6 @@ o/$(MODE)/llamafile/main.o: llamafile/main.cpp
 
 o/$(MODE)/llamafile/llamafile: \
 		o/$(MODE)/llamafile/main.o \
-		o/$(MODE)/llamafile/server.cpp.o \
 		$(LLAMAFILE_OBJS) \
 		$(LLAMAFILE_DEPS) \
 		$(SERVER_ASSETS)

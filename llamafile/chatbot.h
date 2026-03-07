@@ -55,6 +55,15 @@ struct DataUriExtraction {
     const char *marker;                  // marker string used for replacement
 };
 
+struct TranslateGemmaOptions {
+    bool enabled = false;
+    bool image_mode = false;
+    std::string text;
+    std::string image_path;
+    std::string source_lang;
+    std::string target_lang;
+};
+
 extern bool g_manual_mode;
 extern bool g_said_something;
 extern char g_last_printed_char;
@@ -70,8 +79,14 @@ extern volatile sig_atomic_t g_got_sigint;
 extern bool g_interrupted_exit;
 extern common_chat_templates_ptr g_chat_templates;
 extern common_chat_parser_params g_chat_syntax;
+extern TranslateGemmaOptions g_translate_options;
 
 int main(int, char **);
+int run_translate_mode();
+bool parse_translategemma_options(int, char **, TranslateGemmaOptions *, std::string *);
+std::string build_translategemma_text_prompt(std::string_view, std::string_view, std::string_view);
+std::string build_translategemma_image_prompt(std::string_view, std::string_view);
+std::string sanitize_translategemma_output(std::string_view);
 
 bool eval_string(std::string_view, bool, bool);
 DataUriExtraction extract_data_uris(std::string_view, const char *marker);

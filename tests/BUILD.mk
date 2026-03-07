@@ -43,9 +43,29 @@ o/$(MODE)/tests/extract_data_uris_test: \
 	$(CXX) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
 # ==============================================================================
+# Test: translategemma_test
+# ==============================================================================
+
+TRANSLATEGEMMA_TEST_DEPS := \
+	o/$(MODE)/llamafile/translategemma.o \
+	o/$(MODE)/llamafile/string.o \
+	o/$(MODE)/llama.cpp/common/build-info.cpp.o
+
+o/$(MODE)/tests/translategemma_test.o: tests/translategemma_test.cpp
+	@mkdir -p $(@D)
+	$(CXX) $(CXXFLAGS) $(TESTS_CPPFLAGS) -c -o $@ $<
+
+o/$(MODE)/tests/translategemma_test: \
+		o/$(MODE)/tests/translategemma_test.o \
+		$(TRANSLATEGEMMA_TEST_DEPS)
+	@mkdir -p $(@D)
+	$(CXX) $(LDFLAGS) -o $@ $^ $(LDLIBS)
+
+# ==============================================================================
 # Phony targets
 # ==============================================================================
 
 .PHONY: o/$(MODE)/tests
 o/$(MODE)/tests: \
-	o/$(MODE)/tests/extract_data_uris_test.runs
+	o/$(MODE)/tests/extract_data_uris_test.runs \
+	o/$(MODE)/tests/translategemma_test.runs

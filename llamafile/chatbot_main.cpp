@@ -98,11 +98,53 @@ bool is_base_model() {
     return llama_model_meta_val_str(g_model, "tokenizer.chat_template", 0, 0) == -1;
 }
 
+static void maybe_resolve_embedded_model(common_params *params, bool verbose) {
+#ifdef COSMOCC
+    if (!params) {
+        return;
+    }
+    if (params->model.path.empty()) {
+        return;
+    }
+
+    if (params->model.path.rfind("/zip/", 0) == 0) {
+        params->use_mmap = false;
+        return;
+    }
+
+    if (params->model.path.find('/') != std::string::npos) {
+        return;
+    }
+
+    if (access(params->model.path.c_str(), R_OK) == 0) {
+        return;
+    }
+
+    std::string zip_path = "/zip/" + params->model.path;
+    if (access(zip_path.c_str(), R_OK) == 0) {
+        if (verbose) {
+            std::fprintf(stderr,
+                         "info: using bundled model from %s (mmap disabled for /zip)\n",
+                         zip_path.c_str());
+        }
+        params->model.path = zip_path;
+        params->use_mmap = false;
+    }
+#else
+    (void)params;
+    (void)verbose;
+#endif
+}
+
 int main(int argc, char **argv) {
     signal(SIGPIPE, SIG_IGN);
 
-    // print logo
-    logo(argv);
+    if (g_translate_options.enabled) {
+        FLAG_nologo = true;
+    } else {
+        // print logo
+        logo(argv);
+    }
 
     // Check if verbose mode is requested (must be set before Metal init)
     bool verbose = llamafile_has(argv, "--verbose");
@@ -143,6 +185,8 @@ int main(int argc, char **argv) {
         exit(1);
     }
 
+    maybe_resolve_embedded_model(g_params, verbose);
+
     if (llamafile_has_metal() && g_params->n_gpu_layers < 0) {
         // if Metal and no ngl was specified, default to INT_MAX
         g_params->n_gpu_layers = INT_MAX;
@@ -170,6 +214,11 @@ int main(int argc, char **argv) {
     }
 
     // Adjust context size
+    // Translate mode usually operates on short requests; using train context
+    // length by default can dramatically increase startup latency.
+    if (g_translate_options.enabled && g_params->n_ctx <= 0) {
+        g_params->n_ctx = 4096;
+    }
     if (g_params->n_ctx <= 0 || g_params->n_ctx > (int)llama_model_n_ctx_train(g_model))
         g_params->n_ctx = llama_model_n_ctx_train(g_model);
     if (g_params->n_ctx < g_params->n_batch)
@@ -222,7 +271,7 @@ int main(int argc, char **argv) {
 
     // Initialize chat templates for output parsing (e.g., gpt-oss think mode)
     // Use the same approach as common_chat_verify_template() - provide a dummy message
-    if (!is_base_model()) {
+    if (!g_translate_options.enabled && !is_base_model()) {
         g_chat_templates = common_chat_templates_init(g_model, g_params->chat_template);
         if (g_chat_templates) {
             // Provide a minimal dummy message (same approach as common_chat_verify_template)
@@ -264,6 +313,34 @@ int main(int argc, char **argv) {
     // Ensure there's a blank line after info block
     if (!FLAG_nologo) {
         printf("\n");
+    }
+
+    if (g_translate_options.enabled) {
+        int rc = run_translate_mode();
+
+        if (g_mtmd) {
+            print_ephemeral("freeing vision model...");
+            mtmd_free(g_mtmd);
+            clear_ephemeral();
+        }
+
+        if (g_sampler) {
+            common_sampler_free(g_sampler);
+        }
+
+        print_ephemeral("freeing context...");
+        llama_free(g_ctx);
+        clear_ephemeral();
+
+        print_ephemeral("freeing model...");
+        llama_model_free(g_model);
+        clear_ephemeral();
+
+        print_ephemeral("freeing backend...");
+        llama_backend_free();
+        clear_ephemeral();
+
+        return rc;
     }
 
     // Run the REPL
