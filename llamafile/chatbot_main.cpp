@@ -130,6 +130,19 @@ static void maybe_resolve_embedded_model(common_params *params, bool verbose) {
         params->model.path = zip_path;
         params->use_mmap = false;
     }
+
+    if (!params->mmproj.path.empty() &&
+        params->mmproj.path.rfind("/zip/", 0) != 0 &&
+        params->mmproj.path.find('/') == std::string::npos &&
+        access(params->mmproj.path.c_str(), R_OK) != 0) {
+        std::string zip_mmproj = "/zip/" + params->mmproj.path;
+        if (access(zip_mmproj.c_str(), R_OK) == 0) {
+            if (verbose) {
+                std::fprintf(stderr, "info: using bundled vision model from %s\n", zip_mmproj.c_str());
+            }
+            params->mmproj.path = zip_mmproj;
+        }
+    }
 #else
     (void)params;
     (void)verbose;
@@ -217,7 +230,7 @@ int main(int argc, char **argv) {
     // Translate mode usually operates on short requests; using train context
     // length by default can dramatically increase startup latency.
     if (g_translate_options.enabled && g_params->n_ctx <= 0) {
-        g_params->n_ctx = 4096;
+        g_params->n_ctx = g_translate_options.image_mode ? 16384 : 4096;
     }
     if (g_params->n_ctx <= 0 || g_params->n_ctx > (int)llama_model_n_ctx_train(g_model))
         g_params->n_ctx = llama_model_n_ctx_train(g_model);
