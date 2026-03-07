@@ -58,6 +58,7 @@ struct DataUriExtraction {
 struct TranslateGemmaOptions {
     bool enabled = false;
     bool image_mode = false;
+    std::string messages_json;
     std::string text;
     std::string image_path;
     std::string source_lang;

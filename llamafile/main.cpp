@@ -122,7 +122,7 @@ int main(int argc, char **argv) {
     // (first set: flags, second set: arguments with params)
     argc = removeArgs(argc, argv, 
                     {"--server"},
-                    {"--gpu", "--translate-text", "--translate-image", "--source-lang", "--target-lang"}
+                    {"--gpu", "--translate-text", "--translate-image", "--translate-messages-json", "--source-lang", "--target-lang"}
                     );
 
     if (prog == PROG_SERVER) {

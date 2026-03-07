@@ -17,8 +17,10 @@
 
 #include "chatbot.h"
 
+#include <algorithm>
 #include <cctype>
 #include <cstring>
+#include <unordered_map>
 
 namespace lf {
 namespace chatbot {
@@ -56,7 +58,7 @@ bool parse_translategemma_options(int argc, char **argv, TranslateGemmaOptions *
         std::string_view arg = argv[i];
         if (arg == "--translate-text") {
             if (out->enabled) {
-                *error = "only one of --translate-text or --translate-image may be specified";
+                *error = "only one of --translate-text, --translate-image, or --translate-messages-json may be specified";
                 return false;
             }
             const char *value = arg_value(argc, argv, &i, error);
@@ -67,7 +69,7 @@ bool parse_translategemma_options(int argc, char **argv, TranslateGemmaOptions *
             out->text = value;
         } else if (arg == "--translate-image") {
             if (out->enabled) {
-                *error = "only one of --translate-text or --translate-image may be specified";
+                *error = "only one of --translate-text, --translate-image, or --translate-messages-json may be specified";
                 return false;
             }
             const char *value = arg_value(argc, argv, &i, error);
@@ -76,6 +78,17 @@ bool parse_translategemma_options(int argc, char **argv, TranslateGemmaOptions *
             out->enabled = true;
             out->image_mode = true;
             out->image_path = value;
+        } else if (arg == "--translate-messages-json") {
+            if (out->enabled) {
+                *error = "only one of --translate-text, --translate-image, or --translate-messages-json may be specified";
+                return false;
+            }
+            const char *value = arg_value(argc, argv, &i, error);
+            if (!value)
+                return false;
+            out->enabled = true;
+            out->image_mode = false;
+            out->messages_json = value;
         } else if (arg == "--source-lang") {
             const char *value = arg_value(argc, argv, &i, error);
             if (!value)
@@ -90,6 +103,8 @@ bool parse_translategemma_options(int argc, char **argv, TranslateGemmaOptions *
     }
 
     if (!out->enabled)
+        return true;
+    if (!out->messages_json.empty())
         return true;
     if (out->source_lang.empty()) {
         *error = "missing required flag --source-lang";
@@ -118,25 +133,98 @@ bool parse_translategemma_options(int argc, char **argv, TranslateGemmaOptions *
     return true;
 }
 
+static std::string normalize_language_code(std::string_view code) {
+    std::string normalized(code);
+    std::replace(normalized.begin(), normalized.end(), '_', '-');
+    return normalized;
+}
+
+static std::string language_name_for_code(const std::string &normalized_code) {
+    if (normalized_code == "auto")
+        return "detected source language";
+
+    static const std::unordered_map<std::string, std::string> kLanguageNames = {
+        {"ar", "Arabic"},     {"de", "German"},       {"en", "English"},
+        {"es", "Spanish"},    {"fa", "Persian"},      {"fr", "French"},
+        {"hi", "Hindi"},      {"id", "Indonesian"},   {"it", "Italian"},
+        {"ja", "Japanese"},   {"ko", "Korean"},       {"nl", "Dutch"},
+        {"pl", "Polish"},     {"pt", "Portuguese"},   {"ru", "Russian"},
+        {"sv", "Swedish"},    {"th", "Thai"},         {"tr", "Turkish"},
+        {"uk", "Ukrainian"},  {"ur", "Urdu"},         {"vi", "Vietnamese"},
+        {"zh", "Chinese"},
+    };
+
+    std::string base = normalized_code;
+    size_t dash = base.find('-');
+    if (dash != std::string::npos)
+        base.resize(dash);
+
+    auto it = kLanguageNames.find(base);
+    if (it != kLanguageNames.end())
+        return it->second;
+    return normalized_code;
+}
+
+static std::string build_translation_preamble(std::string_view source_lang,
+                                              std::string_view target_lang) {
+    const std::string source_code = normalize_language_code(source_lang);
+    const std::string target_code = normalize_language_code(target_lang);
+    const std::string source_name = language_name_for_code(source_code);
+    const std::string target_name = language_name_for_code(target_code);
+
+    std::string prompt;
+    prompt += "You are a professional ";
+    prompt += source_name;
+    prompt += " (";
+    prompt += source_code;
+    prompt += ") to ";
+    prompt += target_name;
+    prompt += " (";
+    prompt += target_code;
+    prompt += ") translator. Your goal is to accurately convey the meaning and "
+              "nuances of the original ";
+    prompt += source_name;
+    prompt += " text while adhering to ";
+    prompt += target_name;
+    prompt += " grammar, vocabulary, and cultural sensitivities.\n";
+    prompt += "Output plain translated text only. Do not output HTML, XML, Markdown, or any tags like <...>.\n";
+    return prompt;
+}
+
 std::string build_translategemma_text_prompt(std::string_view source_lang,
                                              std::string_view target_lang,
                                              std::string_view text) {
-    std::string prompt = "Translate from ";
-    prompt += source_lang;
-    prompt += " to ";
-    prompt += target_lang;
-    prompt += ". Preserve line breaks when possible.\n\n";
+    const std::string source_name = language_name_for_code(normalize_language_code(source_lang));
+    const std::string target_name = language_name_for_code(normalize_language_code(target_lang));
+
+    std::string prompt = build_translation_preamble(source_lang, target_lang);
+    prompt += "Produce only the ";
+    prompt += target_name;
+    prompt += " translation, without any additional explanations or commentary. "
+              "Please translate the following ";
+    prompt += source_name;
+    prompt += " text into ";
+    prompt += target_name;
+    prompt += ":\n\n\n";
     prompt.append(text.data(), text.size());
     return prompt;
 }
 
 std::string build_translategemma_image_prompt(std::string_view source_lang,
                                               std::string_view target_lang) {
-    std::string prompt = "Extract and translate all text in this image from ";
-    prompt += source_lang;
-    prompt += " to ";
-    prompt += target_lang;
-    prompt += ". Return only the translated text. Do not repeat the source text. Ignore icons, symbols, arrows, and non-text visual elements.";
+    const std::string source_name = language_name_for_code(normalize_language_code(source_lang));
+    const std::string target_name = language_name_for_code(normalize_language_code(target_lang));
+
+    std::string prompt = build_translation_preamble(source_lang, target_lang);
+    prompt += "Please translate the ";
+    prompt += source_name;
+    prompt += " text in the provided image into ";
+    prompt += target_name;
+    prompt += ". Produce only the ";
+    prompt += target_name;
+    prompt += " translation, without any additional explanations, alternatives or commentary. "
+              "Focus only on the text, do not output where the text is located, surrounding objects "
+              "or any other explanation about the picture. Ignore symbols, pictogram, and arrows!\n\n\n";
     return prompt;
 }
 
@@ -184,6 +272,22 @@ std::string sanitize_translategemma_output(std::string_view raw) {
             break;
         clean.erase(pos, strlen("<end_of_turn>"));
     }
+    while (true) {
+        size_t pos = clean.find("<|file_separator|>");
+        if (pos == std::string::npos)
+            break;
+        clean.erase(pos, strlen("<|file_separator|>"));
+    }
+    while (!clean.empty() && (clean.back() == '\n' || clean.back() == '\r'))
+        clean.pop_back();
+    while (!clean.empty() && (clean.front() == '\n' || clean.front() == '\r'))
+        clean.erase(clean.begin());
+    if (clean.rfind("model\n", 0) == 0)
+        clean.erase(0, strlen("model\n"));
+    if (clean.rfind("assistant\n", 0) == 0)
+        clean.erase(0, strlen("assistant\n"));
+    while (!clean.empty() && (clean.front() == '\n' || clean.front() == '\r'))
+        clean.erase(clean.begin());
     while (!clean.empty() && (clean.back() == '\n' || clean.back() == '\r'))
         clean.pop_back();
     return clean;
