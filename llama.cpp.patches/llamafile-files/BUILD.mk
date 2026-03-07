@@ -75,6 +75,7 @@ LLAMA_SRCS_CPP := \
 	llama.cpp/src/models/delta-net-base.cpp \
 	llama.cpp/src/models/dots1.cpp \
 	llama.cpp/src/models/dream.cpp \
+	llama.cpp/src/models/eurobert.cpp \
 	llama.cpp/src/models/ernie4-5-moe.cpp \
 	llama.cpp/src/models/ernie4-5.cpp \
 	llama.cpp/src/models/exaone.cpp \
@@ -213,8 +214,8 @@ COMMON_SRCS_CPP := \
 	llama.cpp/common/jinja/value.cpp \
 	llama.cpp/common/json-partial.cpp \
 	llama.cpp/common/json-schema-to-grammar.cpp \
-	llama.cpp/common/license.cpp \
 	llama.cpp/common/llguidance.cpp \
+	llama.cpp.patches/llamafile-files/common/license.cpp \
 	llama.cpp/common/log.cpp \
 	llama.cpp/common/ngram-cache.cpp \
 	llama.cpp/common/ngram-map.cpp \
@@ -240,9 +241,8 @@ o/$(MODE)/llama.cpp/common/build-info.cpp: llama.cpp/common/build-info.cpp.in
 	    -e 's/@BUILD_TARGET@/$(LLAMA_BUILD_TARGET)/g' \
 	    $< > $@
 
-COMMON_SRCS_CPP += o/$(MODE)/llama.cpp/common/build-info.cpp
-
-COMMON_OBJS := $(COMMON_SRCS_CPP:%.cpp=o/$(MODE)/%.cpp.o)
+COMMON_OBJS := $(COMMON_SRCS_CPP:%.cpp=o/$(MODE)/%.cpp.o) \
+	o/$(MODE)/llama.cpp/common/build-info.cpp.o
 
 # ==============================================================================
 # Additional support files
@@ -356,6 +356,17 @@ $(TOOL_SERVER_OBJS): $(SERVER_ASSETS) llamafile/llamafile.h
 # ==============================================================================
 # Compiler flags
 # ==============================================================================
+
+# Build common sources directly from source tree paths. This avoids matching the
+# generic o/$(MODE)/%.cpp -> o/$(MODE)/%.cpp.o rule for normal source files.
+$(COMMON_SRCS_CPP:%.cpp=o/$(MODE)/%.cpp.o): o/$(MODE)/%.cpp.o: %.cpp $(COSMOCC)
+	@mkdir -p $(@D)
+	$(COMPILE.cc) -frtti -o $@ $<
+
+# build-info.cpp is generated under o/$(MODE), so compile it from there.
+o/$(MODE)/llama.cpp/common/build-info.cpp.o: o/$(MODE)/llama.cpp/common/build-info.cpp $(COSMOCC)
+	@mkdir -p $(@D)
+	$(COMPILE.cc) -frtti -o $@ $<
 
 # Include paths for new llama.cpp structure
 $(LLAMA_CPP_OBJS) $(TOOL_QUANTIZE_OBJS) $(TOOL_IMATRIX_OBJS) \
@@ -488,9 +499,8 @@ o/$(MODE)/llama.cpp/server/llama-server: \
 # Dependencies
 # ==============================================================================
 
-$(LLAMA_CPP_OBJS): llama.cpp/BUILD.mk
-$(TOOL_QUANTIZE_OBJS) $(TOOL_IMATRIX_OBJS) \
-$(TOOL_PERPLEXITY_OBJS) $(TOOL_BENCH_OBJS) $(TOOL_SERVER_OBJS): llama.cpp/BUILD.mk
+# Legacy tree had llama.cpp/BUILD.mk; in this branch we may build from fallback
+# metadata directly, so don't hard-require that file as a prerequisite.
 
 # ==============================================================================
 # Main target

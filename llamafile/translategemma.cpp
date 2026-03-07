@@ -172,6 +172,18 @@ std::string sanitize_translategemma_output(std::string_view raw) {
             break;
         clean.erase(pos, strlen("<|im_start|>"));
     }
+    while (true) {
+        size_t pos = clean.find("<start_of_turn>");
+        if (pos == std::string::npos)
+            break;
+        clean.erase(pos, strlen("<start_of_turn>"));
+    }
+    while (true) {
+        size_t pos = clean.find("<end_of_turn>");
+        if (pos == std::string::npos)
+            break;
+        clean.erase(pos, strlen("<end_of_turn>"));
+    }
     while (!clean.empty() && (clean.back() == '\n' || clean.back() == '\r'))
         clean.pop_back();
     return clean;

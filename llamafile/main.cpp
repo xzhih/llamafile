@@ -46,6 +46,8 @@ enum Program {
     PROG_SERVER,
 };
 
+int server_main(int argc, char **argv);
+
 static enum Program determine_program(char *argv[]) {
     enum Program prog = PROG_UNKNOWN;
     for (int i = 0; argv[i]; ++i) {
@@ -124,8 +126,7 @@ int main(int argc, char **argv) {
                     );
 
     if (prog == PROG_SERVER) {
-        std::fprintf(stderr, "error: --server is not implemented in this TranslateGemma prototype build\n");
-        return 65;
+        return server_main(argc, argv);
     }
 
     // Chat mode (explicit --chat or default when no -p/-f/--random-prompt)

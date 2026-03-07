@@ -34,6 +34,13 @@ static bool sgemm_disabled() {
     return env && (env[0] == '1' || env[0] == 'y' || env[0] == 'Y');
 }
 
+// Disable IQK MoE matmul fast-path when debugging architecture-specific
+// crashes in quantized kernels.
+static bool iqk_mixmul_disabled() {
+    const char *env = getenv("LLAMAFILE_DISABLE_IQK_MIXMUL");
+    return env && (env[0] == '1' || env[0] == 'y' || env[0] == 'Y');
+}
+
 // IQK mixmul function signature
 typedef bool (*iqk_mixmul_func_t)(long, long, long, int, int, const void *, const void *, float *,
                                   long, long, const void *, int, int);
@@ -148,6 +155,9 @@ static const struct GemmFuncs {
 bool llamafile_sgemm(const ggml_compute_params *params, int64_t m, int64_t n, int64_t k,
                      const void *A, int64_t lda, const void *B, int64_t ldb,
                      void *C, int64_t ldc, int Atype, int Btype, int Ctype) {
+    if (sgemm_disabled()) {
+        return false;
+    }
     int ith = params->ith;
     int nth = params->nth;
     return funcs.sgemm(m, n, k, A, lda, B, ldb, C, ldc, ith, nth, Atype, Btype, Ctype);
@@ -170,6 +180,10 @@ bool llamafile_mixmul(const ggml_compute_params *params, const ggml_tensor *weig
 bool llamafile_mixmul_iqk(long Nx, long Ny, long ne00, int ne11, int typeA, const void *A,
                           const void *B, float *C, long nb1, long nb2, const void *vrow_mapping,
                           int ith, int nth) {
+    if (iqk_mixmul_disabled()) {
+        return iqk_mul_mat_moe_unsupported(Nx, Ny, ne00, ne11, typeA, A, B, C, nb1, nb2,
+                                           vrow_mapping, ith, nth);
+    }
     return funcs.iqk_mixmul(Nx, Ny, ne00, ne11, typeA, A, B, C, nb1, nb2, vrow_mapping, ith, nth);
 }
 

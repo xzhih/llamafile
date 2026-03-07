@@ -263,6 +263,7 @@ LLAMAFILE_DEPS = \
 	$(COMMON_OBJS) \
 	$(MTMD_OBJS) \
 	$(HTTPLIB_OBJS) \
+	o/$(MODE)/llamafile/server.cpp.o \
 	$(LLAMAFILE_SERVER_SUPPORT_OBJS) \
 	$(LLAMAFILE_HIGHLIGHT_KEYWORDS) \
 	$(LLAMAFILE_METAL_SOURCES) \
@@ -273,6 +274,17 @@ LLAMAFILE_DEPS = \
 # Server integration
 # ==============================================================================
 
+# Generate embedded server assets when llama.cpp/BUILD.mk isn't available.
+ifndef SERVER_ASSETS
+SERVER_ASSETS := \
+	o/$(MODE)/llama.cpp/tools/server/index.html.gz.hpp \
+	o/$(MODE)/llama.cpp/tools/server/loading.html.hpp
+
+o/$(MODE)/llama.cpp/tools/server/%.hpp: llama.cpp/tools/server/public/%
+	@mkdir -p $(@D)
+	cd $(dir $<) && xxd -i $(notdir $<) > $(abspath $@)
+endif
+
 # Include paths needed for server compilation
 LLAMAFILE_SERVER_INCS := \
 	$(LLAMAFILE_INCLUDES) \
@@ -282,7 +294,15 @@ LLAMAFILE_SERVER_INCS := \
 # Compile server.cpp
 o/$(MODE)/llamafile/server.cpp.o: llama.cpp/tools/server/server.cpp $(SERVER_ASSETS)
 	@mkdir -p $(@D)
+	$(CXX) $(CXXFLAGS) $(LLAMAFILE_CPPFLAGS) $(LLAMAFILE_SERVER_INCS) -Dmain=server_main -c -o $@ $<
+
+# Compile llama.cpp server support sources with explicit include paths.
+# This keeps server builds working even if llama.cpp/BUILD.mk isn't present.
+o/$(MODE)/llama.cpp/tools/server/%.cpp.o: llama.cpp/tools/server/%.cpp
+	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(LLAMAFILE_CPPFLAGS) $(LLAMAFILE_SERVER_INCS) -c -o $@ $<
+
+o/$(MODE)/llama.cpp/tools/server/server-http.cpp.o: $(SERVER_ASSETS)
 
 # ==============================================================================
 # Main executable

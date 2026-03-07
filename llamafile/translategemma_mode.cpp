@@ -3,6 +3,7 @@
 
 #include "chatbot.h"
 
+#include <cstdlib>
 #include <cstdio>
 
 #include "common.h"
@@ -70,6 +71,13 @@ static std::string build_image_request(const char *path) {
 int run_translate_mode() {
     FLAG_nologo = true;
     g_params->prompt.clear();
+
+    // Work around an aarch64 IQK kernel assert hit by some multimodal requests.
+    // This keeps text mode untouched and only affects image translation.
+    if (g_translate_options.image_mode) {
+        setenv("LLAMAFILE_DISABLE_SGEMM", "1", 1);
+        setenv("LLAMAFILE_DISABLE_IQK_MIXMUL", "1", 1);
+    }
 
     std::string request;
     if (g_translate_options.image_mode) {

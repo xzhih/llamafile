@@ -14,8 +14,16 @@ include build/config.mk
 include build/rules.mk
 
 include third_party/BUILD.mk
+ifeq ($(wildcard llama.cpp/BUILD.mk),)
+include llama.cpp.patches/llamafile-files/BUILD.mk
+else
 include llama.cpp/BUILD.mk
+endif
+ifeq ($(wildcard whisper.cpp/BUILD.mk),)
+include whisper.cpp.patches/llamafile-files/BUILD.mk
+else
 include whisper.cpp/BUILD.mk
+endif
 include llamafile/BUILD.mk
 include whisperfile/BUILD.mk
 include tests/BUILD.mk
