@@ -27,6 +27,8 @@ struct RenderedMessagesRequest {
     bool has_media = false;
 };
 
+static std::string wrap_chatml_request(std::string_view user_content);
+
 static std::string trim_whitespace(std::string value) {
     const size_t first = value.find_first_not_of(" \t\r\n");
     if (first == std::string::npos)
@@ -207,6 +209,8 @@ static RenderedMessagesRequest build_messages_json_request() {
     json messages = parse_messages_json_payload();
 
     RenderedMessagesRequest result;
+    std::string merged_user_content;
+    bool saw_user_message = false;
     for (const auto &message : messages) {
         if (!message.is_object()) {
             throw std::invalid_argument("message entries must be objects");
@@ -216,16 +220,42 @@ static RenderedMessagesRequest build_messages_json_request() {
         }
 
         const std::string role = message.at("role").get<std::string>();
-        const std::string content = flatten_message_content(message, &result.has_media);
+        if (role != "user") {
+            continue;
+        }
 
-        result.prompt += "<|im_start|>";
-        result.prompt += role;
-        result.prompt += "\n";
-        result.prompt += content;
-        result.prompt += "\n<|im_end|>\n";
+        const std::string content = flatten_message_content(message, &result.has_media);
+        if (!content.empty()) {
+            if (!merged_user_content.empty()) {
+                merged_user_content += '\n';
+            }
+            merged_user_content += content;
+        }
+        saw_user_message = true;
     }
 
-    result.prompt += "<|im_start|>assistant\n";
+    if (!saw_user_message) {
+        throw std::invalid_argument("messages payload must contain at least one user message");
+    }
+    if (merged_user_content.empty()) {
+        throw std::invalid_argument("messages payload produced empty user content");
+    }
+
+    std::string user_prompt;
+    if (result.has_media) {
+        user_prompt = build_translategemma_image_prompt(
+            g_translate_options.source_lang,
+            g_translate_options.target_lang);
+        user_prompt += "\n\n";
+        user_prompt += merged_user_content;
+    } else {
+        user_prompt = build_translategemma_text_prompt(
+            g_translate_options.source_lang,
+            g_translate_options.target_lang,
+            merged_user_content);
+    }
+
+    result.prompt = wrap_chatml_request(user_prompt);
     return result;
 }
 

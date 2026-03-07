@@ -363,6 +363,13 @@ $(COMMON_SRCS_CPP:%.cpp=o/$(MODE)/%.cpp.o): o/$(MODE)/%.cpp.o: %.cpp $(COSMOCC)
 	@mkdir -p $(@D)
 	$(COMPILE.cc) -frtti -o $@ $<
 
+# llama.cpp/common/{arg,download}.cpp expects one of linux/win/aix branches for PATH_MAX.
+# Cosmopolitan doesn't define those platform macros in this build, so force the _AIX branch.
+$(COMMON_OBJS): private CPPFLAGS += -D_AIX
+
+# ngram-mod.cpp uses std::fill but upstream currently omits <algorithm>.
+o/$(MODE)/llama.cpp/common/ngram-mod.cpp.o: private CPPFLAGS += -include algorithm
+
 # build-info.cpp is generated under o/$(MODE), so compile it from there.
 o/$(MODE)/llama.cpp/common/build-info.cpp.o: o/$(MODE)/llama.cpp/common/build-info.cpp $(COSMOCC)
 	@mkdir -p $(@D)
@@ -380,6 +387,7 @@ $(TOOL_PERPLEXITY_OBJS) $(TOOL_BENCH_OBJS) $(TOOL_SERVER_OBJS) $(MTMD_OBJS): \
 		-iquote llama.cpp/src \
 		-iquote llama.cpp/tools/mtmd \
 		-iquote o/$(MODE)/llama.cpp/tools/server \
+		-isystem llama.cpp.patches/compat \
 		-isystem llama.cpp/vendor
 
 # Server needs llamafile headers for Metal support
