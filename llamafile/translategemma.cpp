@@ -17,10 +17,10 @@
 
 #include "chatbot.h"
 
-#include <algorithm>
 #include <cctype>
 #include <cstring>
-#include <unordered_map>
+
+#include "string.h"
 
 namespace lf {
 namespace chatbot {
@@ -99,11 +99,20 @@ bool parse_translategemma_options(int argc, char **argv, TranslateGemmaOptions *
             if (!value)
                 return false;
             out->target_lang = value;
+        } else if (arg == "--translation-instruction") {
+            const char *value = arg_value(argc, argv, &i, error);
+            if (!value)
+                return false;
+            out->translation_instruction = value;
         }
     }
 
     if (!out->enabled)
         return true;
+    if (!out->messages_json.empty() && !out->translation_instruction.empty()) {
+        *error = "--translation-instruction is not supported with --translate-messages-json";
+        return false;
+    }
     if (!out->messages_json.empty())
         return true;
     if (out->source_lang.empty()) {
@@ -131,101 +140,6 @@ bool parse_translategemma_options(int argc, char **argv, TranslateGemmaOptions *
         return false;
     }
     return true;
-}
-
-static std::string normalize_language_code(std::string_view code) {
-    std::string normalized(code);
-    std::replace(normalized.begin(), normalized.end(), '_', '-');
-    return normalized;
-}
-
-static std::string language_name_for_code(const std::string &normalized_code) {
-    if (normalized_code == "auto")
-        return "detected source language";
-
-    static const std::unordered_map<std::string, std::string> kLanguageNames = {
-        {"ar", "Arabic"},     {"de", "German"},       {"en", "English"},
-        {"es", "Spanish"},    {"fa", "Persian"},      {"fr", "French"},
-        {"hi", "Hindi"},      {"id", "Indonesian"},   {"it", "Italian"},
-        {"ja", "Japanese"},   {"ko", "Korean"},       {"nl", "Dutch"},
-        {"pl", "Polish"},     {"pt", "Portuguese"},   {"ru", "Russian"},
-        {"sv", "Swedish"},    {"th", "Thai"},         {"tr", "Turkish"},
-        {"uk", "Ukrainian"},  {"ur", "Urdu"},         {"vi", "Vietnamese"},
-        {"zh", "Chinese"},
-    };
-
-    std::string base = normalized_code;
-    size_t dash = base.find('-');
-    if (dash != std::string::npos)
-        base.resize(dash);
-
-    auto it = kLanguageNames.find(base);
-    if (it != kLanguageNames.end())
-        return it->second;
-    return normalized_code;
-}
-
-static std::string build_translation_preamble(std::string_view source_lang,
-                                              std::string_view target_lang) {
-    const std::string source_code = normalize_language_code(source_lang);
-    const std::string target_code = normalize_language_code(target_lang);
-    const std::string source_name = language_name_for_code(source_code);
-    const std::string target_name = language_name_for_code(target_code);
-
-    std::string prompt;
-    prompt += "You are a professional ";
-    prompt += source_name;
-    prompt += " (";
-    prompt += source_code;
-    prompt += ") to ";
-    prompt += target_name;
-    prompt += " (";
-    prompt += target_code;
-    prompt += ") translator. Your goal is to accurately convey the meaning and "
-              "nuances of the original ";
-    prompt += source_name;
-    prompt += " text while adhering to ";
-    prompt += target_name;
-    prompt += " grammar, vocabulary, and cultural sensitivities.\n";
-    prompt += "Output plain translated text only. Do not output HTML, XML, Markdown, or any tags like <...>.\n";
-    return prompt;
-}
-
-std::string build_translategemma_text_prompt(std::string_view source_lang,
-                                             std::string_view target_lang,
-                                             std::string_view text) {
-    const std::string source_name = language_name_for_code(normalize_language_code(source_lang));
-    const std::string target_name = language_name_for_code(normalize_language_code(target_lang));
-
-    std::string prompt = build_translation_preamble(source_lang, target_lang);
-    prompt += "Produce only the ";
-    prompt += target_name;
-    prompt += " translation, without any additional explanations or commentary. "
-              "Please translate the following ";
-    prompt += source_name;
-    prompt += " text into ";
-    prompt += target_name;
-    prompt += ":\n\n\n";
-    prompt.append(text.data(), text.size());
-    return prompt;
-}
-
-std::string build_translategemma_image_prompt(std::string_view source_lang,
-                                              std::string_view target_lang) {
-    const std::string source_name = language_name_for_code(normalize_language_code(source_lang));
-    const std::string target_name = language_name_for_code(normalize_language_code(target_lang));
-
-    std::string prompt = build_translation_preamble(source_lang, target_lang);
-    prompt += "Please translate the ";
-    prompt += source_name;
-    prompt += " text in the provided image into ";
-    prompt += target_name;
-    prompt += ". Produce only the ";
-    prompt += target_name;
-    prompt += " translation, without any additional explanations, alternatives or commentary. "
-              "Focus only on the text, do not output where the text is located, surrounding objects "
-              "or any other explanation about the picture. Ignore symbols, pictogram, and arrows!\n\n\n";
-    return prompt;
 }
 
 std::string sanitize_translategemma_output(std::string_view raw) {
@@ -267,10 +181,22 @@ std::string sanitize_translategemma_output(std::string_view raw) {
         clean.erase(pos, strlen("<start_of_turn>"));
     }
     while (true) {
+        size_t pos = clean.find("</start_of_turn>");
+        if (pos == std::string::npos)
+            break;
+        clean.erase(pos, strlen("</start_of_turn>"));
+    }
+    while (true) {
         size_t pos = clean.find("<end_of_turn>");
         if (pos == std::string::npos)
             break;
         clean.erase(pos, strlen("<end_of_turn>"));
+    }
+    while (true) {
+        size_t pos = clean.find("</end_of_turn>");
+        if (pos == std::string::npos)
+            break;
+        clean.erase(pos, strlen("</end_of_turn>"));
     }
     while (true) {
         size_t pos = clean.find("<|file_separator|>");

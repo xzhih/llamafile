@@ -216,6 +216,29 @@ static bool write_file(const char *path, const char *content, size_t size) {
     return true;
 }
 
+static const char *get_metal_cache_tag(void) {
+    return "GGML_VERSION=" GGML_VERSION "\n"
+           "GGML_COMMIT=" GGML_COMMIT "\n";
+}
+
+static bool read_metal_cache_tag(const char *path) {
+    size_t n = 0;
+    char *cached = read_file(path, &n);
+    if (!cached) {
+        return false;
+    }
+    const char *want = get_metal_cache_tag();
+    const size_t want_n = strlen(want);
+    const bool ok = n == want_n && !memcmp(cached, want, want_n);
+    free(cached);
+    return ok;
+}
+
+static bool write_metal_cache_tag(const char *path) {
+    const char *tag = get_metal_cache_tag();
+    return write_file(path, tag, strlen(tag));
+}
+
 // Preprocess ggml-metal.metal to inline headers
 // Metal runtime compiler doesn't support include paths
 static bool PreprocessMetalShader(const char *app_dir) {
@@ -313,17 +336,19 @@ static bool PreprocessMetalShader(const char *app_dir) {
 static bool BuildMetal(const char *dso) {
     char app_dir[PATH_MAX];
     char src[PATH_MAX];
+    char cache_tag_path[PATH_MAX];
     bool needs_rebuild = false;
+    bool has_dso = false;
+    bool cache_tag_ok = false;
 
     llamafile_get_app_dir(app_dir, PATH_MAX);
+    snprintf(cache_tag_path, PATH_MAX, "%sggml-metal.cache", app_dir);
 
-    // Check if dylib already exists for this version
-    // Since we use versioned paths, source updates come with new versions
+    // Track if a cached dylib exists; compatibility is checked below.
     struct stat dso_stat;
-    if (stat(dso, &dso_stat) == 0 && !FLAG_recompile) {
-        if (FLAG_verbose)
-            fprintf(stderr, "metal: using cached %s\n", dso);
-        return true;
+    has_dso = (stat(dso, &dso_stat) == 0);
+    if (has_dso && !FLAG_recompile) {
+        cache_tag_ok = read_metal_cache_tag(cache_tag_path);
     }
 
     // Create app directory
@@ -370,18 +395,39 @@ static bool BuildMetal(const char *dso) {
     }
 
     // Check if dylib needs rebuild
-    snprintf(src, PATH_MAX, "%sggml-metal.cpp", app_dir);
-    if (!needs_rebuild) {
-        switch (llamafile_is_file_newer_than(src, dso)) {
-        case -1:
-            return false;
-        case 0:
-            break;
-        case 1:
-            needs_rebuild = true;
-            break;
-        default:
-            __builtin_unreachable();
+    if (!has_dso) {
+        needs_rebuild = true;
+    } else if (!needs_rebuild) {
+        for (size_t i = 0; i < sizeof(metal_srcs) / sizeof(*metal_srcs); ++i) {
+            snprintf(src, PATH_MAX, "%s%s", app_dir, metal_srcs[i].name);
+            switch (llamafile_is_file_newer_than(src, dso)) {
+            case -1:
+                return false;
+            case 0:
+                break;
+            case 1:
+                needs_rebuild = true;
+                break;
+            default:
+                __builtin_unreachable();
+            }
+            if (needs_rebuild) {
+                break;
+            }
+        }
+    }
+
+    // Cache compatibility guard: rebuild when ggml version/commit changed.
+    if (has_dso && !needs_rebuild && !FLAG_recompile && cache_tag_ok) {
+        if (FLAG_verbose) {
+            fprintf(stderr, "metal: using cached %s\n", dso);
+        }
+        return true;
+    }
+    if (has_dso && !needs_rebuild && !cache_tag_ok) {
+        needs_rebuild = true;
+        if (FLAG_verbose) {
+            fprintf(stderr, "metal: cache tag mismatch, rebuilding %s\n", dso);
         }
     }
 
@@ -564,6 +610,10 @@ static bool BuildMetal(const char *dso) {
             perror(dso);
             unlink(tmpdso);
             return false;
+        }
+
+        if (!write_metal_cache_tag(cache_tag_path) && FLAG_verbose) {
+            fprintf(stderr, "metal: warning: failed to write cache tag %s\n", cache_tag_path);
         }
 
         if (FLAG_verbose)

@@ -167,7 +167,7 @@ LLAMA_SRCS_CPP := \
 	llama.cpp/src/llama-arch.cpp \
 	llama.cpp/src/llama-batch.cpp \
 	llama.cpp/src/llama-chat.cpp \
-	llama.cpp/src/llama-context.cpp \
+	llama.cpp.patches/llamafile-files/src/llama-context.cpp \
 	llama.cpp/src/llama-cparams.cpp \
 	llama.cpp/src/llama-grammar.cpp \
 	llama.cpp/src/llama-graph.cpp \
@@ -198,8 +198,9 @@ LLAMA_OBJS := $(LLAMA_SRCS_CPP:%.cpp=o/$(MODE)/%.cpp.o)
 
 COMMON_SRCS_CPP := \
 	llama.cpp/common/arg.cpp \
-	llama.cpp/common/chat-parser-xml-toolcall.cpp \
-	llama.cpp/common/chat-parser.cpp \
+	llama.cpp/common/chat-auto-parser-generator.cpp \
+	llama.cpp.patches/llamafile-files/common/chat-auto-parser-helpers.cpp \
+	llama.cpp/common/chat-diff-analyzer.cpp \
 	llama.cpp/common/chat-peg-parser.cpp \
 	llama.cpp/common/chat.cpp \
 	llama.cpp/common/common.cpp \
@@ -384,6 +385,7 @@ $(TOOL_PERPLEXITY_OBJS) $(TOOL_BENCH_OBJS) $(TOOL_SERVER_OBJS) $(MTMD_OBJS): \
 		-iquote llama.cpp/ggml/include \
 		-iquote llama.cpp/ggml/src \
 		-iquote llama.cpp/ggml/src/ggml-cpu \
+		-iquote llama.cpp.patches/llamafile-files/src \
 		-iquote llama.cpp/src \
 		-iquote llama.cpp/tools/mtmd \
 		-iquote o/$(MODE)/llama.cpp/tools/server \

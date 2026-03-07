@@ -91,35 +91,23 @@ The code has been updated to use the new llama.cpp API:
 
 ## Current Limitations
 
-1. **Image Processing**: The multimodal (mtmd) API integration is stubbed out. Images can be loaded but processing returns an error. Full implementation requires adapting to the new mtmd chunk-based API.
+1. **Image Translation Quality**: TranslateGemma image translation now runs through the mtmd path, but dense screenshots, tables, and long UI captures can still produce incomplete translations because the underlying model is optimized for relatively compact image-text inputs.
 
 2. **Server Integration**: The background server feature is not yet implemented. Use the llama.cpp server separately for now.
 
-3. **Apple Metal in APE TUI Build**: In this prototype branch, the `o//llamafile/llamafile` APE TUI build can exit during GPU model loading on macOS. As a temporary workaround, run translation through a native `llama-server` binary.
+3. **Official Message Schema**: `--translate-messages-json` now expects the official TranslateGemma message structure:
+   - roles must alternate `user` / `assistant`
+   - each `user.content` must be an array with exactly one item
+   - that item must have `type`, `source_lang_code`, `target_lang_code`, and either `text` or `url`
+   - remote image URLs are not fetched automatically in translate mode; use a data URI or local file path instead
 
 4. **Metal cache compatibility**: If you switch between builds that share the same llamafile version directory, stale `ggml-metal.dylib` cache can cause startup crashes. This prototype now uses a bumped version namespace (`0.10.1-dev`) to avoid cache collisions with earlier `0.10.0` experiments.
 
-### Temporary GPU Workaround (Text Translation)
+### TranslateGemma Modes
 
-Use the helper script below, which starts `llama-server` with:
-
-- `--no-jinja`
-- `--chat-template chatml`
-- GPU offload enabled (`-ngl 999` by default)
-
-```sh
-./tools/translategemma_gpu_translate.sh \
-  --model /tmp/tgpublisher-models/translategemma-4b-it.Q2_K.gguf \
-  --source-lang en \
-  --target-lang zh \
-  --text "Hello world"
-```
-
-If your `llama-server` is not in `/tmp/llama-old-build/bin/llama-server` or `/tmp/llama.cpp-build/bin/llama-server`, set:
-
-```sh
-LLAMA_SERVER_BIN=/absolute/path/to/llama-server
-```
+- `--translate-text` and `--translate-image` render the model's official TranslateGemma chat template.
+- `--translation-instruction` adds a controlled translation preference line for those two modes only.
+- `--translate-messages-json` does not add extra prompting on top of the supplied official messages payload.
 
 ## Cosmopolitan FLAG System
 

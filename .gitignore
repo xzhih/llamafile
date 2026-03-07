@@ -2,6 +2,8 @@
 
 /o
 /.cosmocc
+/dist
+/.DS_Store
 /TAGS
 /HTAGS
 /cosmocc

@@ -63,6 +63,24 @@ TEST(parse_translate_text_args) {
     ASSERT_STR_EQ(std::string("Hello world"), opts.text, "text payload should be captured");
 }
 
+TEST(parse_translation_instruction_args) {
+    char prog[] = "llamafile";
+    char flag1[] = "--translate-text";
+    char text[] = "Hello world";
+    char flag2[] = "--source-lang";
+    char source[] = "en";
+    char flag3[] = "--target-lang";
+    char target[] = "zh-CN";
+    char flag4[] = "--translation-instruction";
+    char instruction[] = "Keep brand names in English.";
+    char *argv[] = {prog, flag1, text, flag2, source, flag3, target, flag4, instruction, nullptr};
+    TranslateGemmaOptions opts;
+    std::string error;
+    ASSERT_TRUE(parse_translategemma_options(9, argv, &opts, &error), "translation instruction args should parse");
+    ASSERT_STR_EQ(std::string("Keep brand names in English."), opts.translation_instruction,
+                  "translation instruction should be captured");
+}
+
 TEST(parse_rejects_missing_target_lang) {
     char prog[] = "llamafile";
     char flag1[] = "--translate-text";
@@ -79,7 +97,7 @@ TEST(parse_rejects_missing_target_lang) {
 TEST(parse_translate_messages_json_args) {
     char prog[] = "llamafile";
     char flag1[] = "--translate-messages-json";
-    char payload[] = "[{\"role\":\"user\",\"content\":\"hello\"}]";
+    char payload[] = "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"source_lang_code\":\"en\",\"target_lang_code\":\"zh-CN\",\"text\":\"hello\"}]}]";
     char *argv[] = {prog, flag1, payload, nullptr};
     TranslateGemmaOptions opts;
     std::string error;
@@ -89,29 +107,29 @@ TEST(parse_translate_messages_json_args) {
     ASSERT_STR_EQ(std::string(payload), opts.messages_json, "messages json payload should be captured");
 }
 
-TEST(build_text_prompt) {
-    auto prompt = build_translategemma_text_prompt("en", "zh-CN", "Hello world");
-    ASSERT_STR_EQ(
-        std::string("You are a professional English (en) to Chinese (zh-CN) translator. Your goal is to accurately convey the meaning and nuances of the original English text while adhering to Chinese grammar, vocabulary, and cultural sensitivities.\n"
-                    "Output plain translated text only. Do not output HTML, XML, Markdown, or any tags like <...>.\n"
-                    "Produce only the Chinese translation, without any additional explanations or commentary. Please translate the following English text into Chinese:\n\n\nHello world"),
-        prompt,
-        "text prompt should match expected template");
-}
-
-TEST(build_image_prompt) {
-    auto prompt = build_translategemma_image_prompt("en", "zh-CN");
-    ASSERT_STR_EQ(
-        std::string("You are a professional English (en) to Chinese (zh-CN) translator. Your goal is to accurately convey the meaning and nuances of the original English text while adhering to Chinese grammar, vocabulary, and cultural sensitivities.\n"
-                    "Output plain translated text only. Do not output HTML, XML, Markdown, or any tags like <...>.\n"
-                    "Please translate the English text in the provided image into Chinese. Produce only the Chinese translation, without any additional explanations, alternatives or commentary. Focus only on the text, do not output where the text is located, surrounding objects or any other explanation about the picture. Ignore symbols, pictogram, and arrows!\n\n\n"),
-        prompt,
-        "image prompt should match expected template");
+TEST(parse_rejects_instruction_with_messages_json) {
+    char prog[] = "llamafile";
+    char flag1[] = "--translate-messages-json";
+    char payload[] = "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"source_lang_code\":\"en\",\"target_lang_code\":\"zh-CN\",\"text\":\"hello\"}]}]";
+    char flag2[] = "--translation-instruction";
+    char instruction[] = "Keep product names in English.";
+    char *argv[] = {prog, flag1, payload, flag2, instruction, nullptr};
+    TranslateGemmaOptions opts;
+    std::string error;
+    ASSERT_FALSE(parse_translategemma_options(5, argv, &opts, &error),
+                 "translation instruction should be rejected with messages json");
+    ASSERT_STR_EQ(std::string("--translation-instruction is not supported with --translate-messages-json"), error,
+                  "messages json rejection should be stable");
 }
 
 TEST(sanitize_output) {
     auto output = sanitize_translategemma_output("<start_of_turn>model\nHello\n<|file_separator|>\n<end_of_turn>\n");
     ASSERT_STR_EQ(std::string("Hello"), output, "output sanitizer should remove multimodal marker");
+}
+
+TEST(sanitize_output_slash_turn_marker) {
+    auto output = sanitize_translategemma_output("Hello\n</start_of_turn>\n");
+    ASSERT_STR_EQ(std::string("Hello"), output, "output sanitizer should remove slash turn marker");
 }
 
 int main(int argc, char *argv[]) {

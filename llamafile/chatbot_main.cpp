@@ -328,6 +328,14 @@ int main(int argc, char **argv) {
     if (g_translate_options.enabled) {
         int rc = run_translate_mode();
 
+        // Some Metal configurations can crash during teardown even after successful
+        // generation. Translate mode is single-shot, so exiting directly is safe.
+        if (FLAG_gpu != LLAMAFILE_GPU_DISABLE) {
+            std::fflush(stdout);
+            std::fflush(stderr);
+            _exit(rc);
+        }
+
         if (g_mtmd) {
             print_ephemeral("freeing vision model...");
             mtmd_free(g_mtmd);

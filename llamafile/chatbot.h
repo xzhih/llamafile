@@ -63,6 +63,7 @@ struct TranslateGemmaOptions {
     std::string image_path;
     std::string source_lang;
     std::string target_lang;
+    std::string translation_instruction;
 };
 
 extern bool g_manual_mode;
@@ -85,8 +86,6 @@ extern TranslateGemmaOptions g_translate_options;
 int main(int, char **);
 int run_translate_mode();
 bool parse_translategemma_options(int, char **, TranslateGemmaOptions *, std::string *);
-std::string build_translategemma_text_prompt(std::string_view, std::string_view, std::string_view);
-std::string build_translategemma_image_prompt(std::string_view, std::string_view);
 std::string sanitize_translategemma_output(std::string_view);
 
 bool eval_string(std::string_view, bool, bool);
