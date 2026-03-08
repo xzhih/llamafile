@@ -56,10 +56,15 @@ o/$(MODE)/tests/extract_data_uris_test: \
 # ==============================================================================
 
 TRANSLATEGEMMA_TEST_DEPS := \
+	o/$(MODE)/llamafile/datauri.o \
 	o/$(MODE)/llamafile/embedded_resource.o \
+	o/$(MODE)/llamafile/image.o \
 	o/$(MODE)/llamafile/server_mode.o \
 	o/$(MODE)/llamafile/translategemma.o \
+	o/$(MODE)/llamafile/translategemma_request.o \
 	o/$(MODE)/llamafile/string.o \
+	o/$(MODE)/llamafile/xterm.o \
+	o/$(MODE)/third_party/stb/stb.a \
 	$(LLAMA_COMMON_JINJA_DEPS) \
 	o/$(MODE)/llama.cpp/common/build-info.cpp.o
 

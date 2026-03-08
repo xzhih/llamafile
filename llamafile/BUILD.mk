@@ -145,6 +145,8 @@ LLAMAFILE_SRCS_CPP := \
 	llamafile/server_mode.cpp \
 	llamafile/string.cpp \
 	llamafile/translategemma.cpp \
+	llamafile/translategemma_render.cpp \
+	llamafile/translategemma_request.cpp \
 	llamafile/translategemma_mode.cpp \
 	llamafile/xterm.cpp \
 	$(LLAMAFILE_HIGHLIGHT_SRCS)

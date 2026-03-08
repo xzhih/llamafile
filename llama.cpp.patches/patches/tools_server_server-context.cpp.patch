@@ -1,0 +1,88 @@
+diff --git a/tools/server/server-context.cpp b/tools/server/server-context.cpp
+--- a/llama.cpp/tools/server/server-context.cpp
++++ b/llama.cpp/tools/server/server-context.cpp
+@@ -11,6 +11,7 @@
+ #include "speculative.h"
+ #include "mtmd.h"
+ #include "mtmd-helper.h"
++#include "translategemma_request.h"
+ 
+ #include <algorithm>
+ #include <cstddef>
+@@ -3198,6 +3199,61 @@ std::unique_ptr<server_res_generator> server_routes::handle_completions_impl(
+     return res;
+ }
+ 
++std::unique_ptr<server_res_generator> server_routes::handle_translategemma_request(
++            const server_http_req & req,
++            const json & body,
++            bool messages_mode) {
++    std::string error;
++    lf::chatbot::TranslateGemmaHttpRequest translate_req;
++    const bool ok = messages_mode
++        ? lf::chatbot::parse_translategemma_http_messages_request(body, &translate_req, &error)
++        : lf::chatbot::parse_translategemma_http_translate_request(body, &translate_req, &error);
++    if (!ok) {
++        auto res = create_response();
++        res->error(format_error_response(error, ERROR_TYPE_INVALID_REQUEST));
++        return res;
++    }
++
++    const char *template_cstr = llama_model_chat_template(ctx_server.model, nullptr);
++    const std::string template_source = template_cstr ? template_cstr : "";
++    if (!lf::chatbot::is_translategemma_chat_template_source(template_source)) {
++        auto res = create_response();
++        res->error(format_error_response(
++            "loaded model does not expose a TranslateGemma translation template",
++            ERROR_TYPE_NOT_SUPPORTED));
++        return res;
++    }
++    if (translate_req.request.has_media && ctx_server.mctx == nullptr) {
++        auto res = create_response();
++        res->error(format_error_response(
++            "multimodal model not loaded (use --mmproj to specify vision model)",
++            ERROR_TYPE_INVALID_REQUEST));
++        return res;
++    }
++
++    std::vector<raw_buffer> files;
++    const std::string media_placeholder = translate_req.request.has_media ? mtmd_default_marker() : "";
++    auto rendered = lf::chatbot::render_translategemma_request(
++        template_source,
++        ctx_server.vocab,
++        translate_req.request,
++        translate_req.translation_instruction,
++        media_placeholder);
++    for (const auto &bytes : rendered.image_bytes) {
++        files.emplace_back(bytes.begin(), bytes.end());
++    }
++
++    json generation = translate_req.generation;
++    generation["prompt"] = rendered.prompt;
++
++    return handle_completions_impl(
++        req,
++        SERVER_TASK_TYPE_COMPLETION,
++        generation,
++        files,
++        TASK_RESPONSE_TYPE_OAI_CHAT);
++}
++
+ std::unique_ptr<server_res_generator> server_routes::create_response(bool bypass_sleep) {
+     return std::make_unique<server_res_generator>(queue_tasks, queue_results, params.sleep_idle_seconds, bypass_sleep);
+ }
+@@ -3614,6 +3670,14 @@ void server_routes::init_routes() {
+             TASK_RESPONSE_TYPE_OAI_CHAT);
+     };
+ 
++    this->post_translate = [this](const server_http_req & req) {
++        return handle_translategemma_request(req, json::parse(req.body), false);
++    };
++
++    this->post_translate_messages = [this](const server_http_req & req) {
++        return handle_translategemma_request(req, json::parse(req.body), true);
++    };
++
+     this->post_responses_oai = [this](const server_http_req & req) {
+         auto res = create_response();
+         std::vector<raw_buffer> files;

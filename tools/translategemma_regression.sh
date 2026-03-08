@@ -11,7 +11,7 @@ Purpose:
   1) dev binary text/image translation
   2) packaged .llamafile text/image translation (implicit and explicit /zip)
   3) --translate-messages-json text/image (local path + data URI)
-  4) optional dev + packaged server smoke tests (/health, /v1/models, /completion, /v1/chat/completions)
+  4) optional dev + packaged server smoke tests (/health, /v1/models, /v1/translate, /v1/translate/messages)
 
 Options:
   --model PATH              GGUF model path (required)
@@ -80,7 +80,7 @@ image_to_data_uri() {
   local mime
   mime="$(mime_from_path "$path")"
   local b64
-  b64="$(base64 <"$path" | tr -d '\n')"
+  b64="$(base64 <"$path" | tr -d '\r\n')"
   printf 'data:%s;base64,%s' "$mime" "$b64"
 }
 
@@ -102,6 +102,7 @@ RUN_SERVER_SMOKE="0"
 TIMEOUT_SEC="120"
 KEEP_ARTIFACTS="0"
 REQUIRE_METAL="auto"
+IMAGE_SOURCE_LANG="auto"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -308,6 +309,36 @@ print(message.get("content", ""))
 PY
 }
 
+extract_chat_stream_content() {
+  local path="$1"
+  python3 - "$path" <<'PY'
+import json
+import sys
+
+parts = []
+with open(sys.argv[1], "r", encoding="utf-8") as fh:
+    for raw in fh:
+        line = raw.strip()
+        if not line.startswith("data: "):
+            continue
+        payload = line[6:]
+        if payload == "[DONE]":
+            break
+        try:
+            data = json.loads(payload)
+        except json.JSONDecodeError:
+            continue
+        choices = data.get("choices") or []
+        if not choices:
+            continue
+        delta = choices[0].get("delta") or {}
+        content = delta.get("content")
+        if isinstance(content, str):
+            parts.append(content)
+print("".join(parts))
+PY
+}
+
 run_server_case() {
   local name="$1"
   shift
@@ -315,7 +346,7 @@ run_server_case() {
   local port="$SERVER_PORT_NEXT"
   SERVER_PORT_NEXT=$((SERVER_PORT_NEXT + 1))
 
-  local log_file body_file http_code completion_text chat_text
+  local log_file body_file http_code response_text
   log_file="$(mktemp /tmp/${name}.server.XXXXXX)"
   body_file="$(mktemp /tmp/${name}.body.XXXXXX)"
 
@@ -369,15 +400,15 @@ run_server_case() {
     return
   fi
 
-  local completion_payload
-  completion_payload="{\"prompt\":\"$(json_escape_inline "Say hello briefly.")\",\"n_predict\":${N_PREDICT},\"temperature\":0,\"stream\":false}"
+  local translate_payload
+  translate_payload="{\"text\":\"$(json_escape_inline "$TEXT")\",\"source_lang\":\"$(json_escape_inline "$SOURCE_LANG")\",\"target_lang\":\"$(json_escape_inline "$TARGET_LANG")\",\"translation_instruction\":\"$(json_escape_inline "Use Mainland China UI wording. Keep product names in English.")\",\"max_tokens\":${N_PREDICT},\"temperature\":0,\"stream\":false}"
   http_code="$(curl -sS -o "$body_file" -w '%{http_code}' \
     -H 'Content-Type: application/json' \
-    -d "$completion_payload" \
-    "http://127.0.0.1:$port/completion" || true)"
-  completion_text="$(extract_completion_content "$body_file" | strip_cr)"
-  if [[ "$http_code" != "200" ]] || [[ -z "$completion_text" ]]; then
-    echo "FAIL [$name]: /completion returned HTTP $http_code with empty content" >&2
+    -d "$translate_payload" \
+    "http://127.0.0.1:$port/v1/translate" || true)"
+  response_text="$(extract_chat_content "$body_file" | strip_cr)"
+  if [[ "$http_code" != "200" ]] || [[ -z "$response_text" ]]; then
+    echo "FAIL [$name]: /v1/translate returned HTTP $http_code with empty content" >&2
     cat "$body_file" >&2 || true
     FAIL_COUNT=$((FAIL_COUNT + 1))
     stop_server "$server_pid"
@@ -385,15 +416,31 @@ run_server_case() {
     return
   fi
 
-  local chat_payload
-  chat_payload="{\"messages\":[{\"role\":\"user\",\"content\":\"Reply with a short greeting.\"}],\"max_tokens\":${N_PREDICT},\"temperature\":0,\"stream\":false}"
+  local stream_payload
+  stream_payload="{\"text\":\"$(json_escape_inline "$TEXT")\",\"source_lang\":\"$(json_escape_inline "$SOURCE_LANG")\",\"target_lang\":\"$(json_escape_inline "$TARGET_LANG")\",\"max_tokens\":${N_PREDICT},\"temperature\":0,\"stream\":true}"
   http_code="$(curl -sS -o "$body_file" -w '%{http_code}' \
     -H 'Content-Type: application/json' \
-    -d "$chat_payload" \
-    "http://127.0.0.1:$port/v1/chat/completions" || true)"
-  chat_text="$(extract_chat_content "$body_file" | strip_cr)"
-  if [[ "$http_code" != "200" ]] || [[ -z "$chat_text" ]]; then
-    echo "FAIL [$name]: /v1/chat/completions returned HTTP $http_code with empty content" >&2
+    -d "$stream_payload" \
+    "http://127.0.0.1:$port/v1/translate" || true)"
+  response_text="$(extract_chat_stream_content "$body_file" | strip_cr)"
+  if [[ "$http_code" != "200" ]] || [[ -z "$response_text" ]]; then
+    echo "FAIL [$name]: streaming /v1/translate returned HTTP $http_code with empty content" >&2
+    cat "$body_file" >&2 || true
+    FAIL_COUNT=$((FAIL_COUNT + 1))
+    stop_server "$server_pid"
+    rm -f "$log_file" "$body_file"
+    return
+  fi
+
+  local messages_payload
+  messages_payload="{\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"source_lang_code\":\"$(json_escape_inline "$SOURCE_LANG")\",\"target_lang_code\":\"$(json_escape_inline "$TARGET_LANG")\",\"text\":\"$(json_escape_inline "$TEXT")\"}]}],\"translation_instruction\":\"$(json_escape_inline "Keep brand names in English.")\",\"max_tokens\":${N_PREDICT},\"temperature\":0,\"stream\":false}"
+  http_code="$(curl -sS -o "$body_file" -w '%{http_code}' \
+    -H 'Content-Type: application/json' \
+    -d "$messages_payload" \
+    "http://127.0.0.1:$port/v1/translate/messages" || true)"
+  response_text="$(extract_chat_content "$body_file" | strip_cr)"
+  if [[ "$http_code" != "200" ]] || [[ -z "$response_text" ]]; then
+    echo "FAIL [$name]: /v1/translate/messages returned HTTP $http_code with empty content" >&2
     cat "$body_file" >&2 || true
     FAIL_COUNT=$((FAIL_COUNT + 1))
     stop_server "$server_pid"
@@ -413,14 +460,14 @@ run_server_case() {
   if [[ "$has_mmproj_arg" == "1" ]] && [[ -n "$IMAGE" ]]; then
     local image_data_uri image_payload
     image_data_uri="$(image_to_data_uri "$IMAGE")"
-    image_payload="{\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Describe this image briefly.\"},{\"type\":\"image_url\",\"image_url\":{\"url\":\"$(json_escape_inline "$image_data_uri")\"}}]}],\"max_tokens\":${N_PREDICT},\"temperature\":0,\"stream\":false}"
+    image_payload="{\"image_data_url\":\"$(json_escape_inline "$image_data_uri")\",\"source_lang\":\"auto\",\"target_lang\":\"$(json_escape_inline "$TARGET_LANG")\",\"translation_instruction\":\"$(json_escape_inline "Preserve product names in English.")\",\"max_tokens\":${N_PREDICT},\"temperature\":0,\"stream\":false}"
     http_code="$(curl -sS -o "$body_file" -w '%{http_code}' \
       -H 'Content-Type: application/json' \
       -d "$image_payload" \
-      "http://127.0.0.1:$port/v1/chat/completions" || true)"
-    chat_text="$(extract_chat_content "$body_file" | strip_cr)"
-    if [[ "$http_code" != "200" ]] || [[ -z "$chat_text" ]]; then
-      echo "FAIL [$name]: multimodal /v1/chat/completions returned HTTP $http_code with empty content" >&2
+      "http://127.0.0.1:$port/v1/translate" || true)"
+    response_text="$(extract_chat_content "$body_file" | strip_cr)"
+    if [[ "$http_code" != "200" ]] || [[ -z "$response_text" ]]; then
+      echo "FAIL [$name]: multimodal /v1/translate returned HTTP $http_code with empty content" >&2
       cat "$body_file" >&2 || true
       FAIL_COUNT=$((FAIL_COUNT + 1))
       stop_server "$server_pid"
@@ -429,7 +476,7 @@ run_server_case() {
     fi
   fi
 
-  echo "PASS [$name]: completion/chat routes responded"
+  echo "PASS [$name]: translate routes responded"
   PASS_COUNT=$((PASS_COUNT + 1))
   stop_server "$server_pid"
   rm -f "$log_file" "$body_file"
@@ -519,7 +566,7 @@ if [[ -n "$IMAGE" ]]; then
     -m "$MODEL" \
     --mmproj "$MMPROJ" \
     --translate-image "$IMAGE" \
-    --source-lang "$SOURCE_LANG" \
+    --source-lang "$IMAGE_SOURCE_LANG" \
     --target-lang "$TARGET_LANG" \
     -n "$N_PREDICT"
 
@@ -528,11 +575,11 @@ if [[ -n "$IMAGE" ]]; then
     -m "/zip/$MODEL_BASENAME" \
     --mmproj "/zip/$MMPROJ_BASENAME" \
     --translate-image "$IMAGE" \
-    --source-lang "$SOURCE_LANG" \
+    --source-lang "$IMAGE_SOURCE_LANG" \
     --target-lang "$TARGET_LANG" \
     -n "$N_PREDICT"
 
-  MSG_IMAGE_LOCAL_PAYLOAD="[{\"role\":\"user\",\"content\":[{\"type\":\"image\",\"source_lang_code\":\"$(json_escape_inline "$SOURCE_LANG")\",\"target_lang_code\":\"$(json_escape_inline "$TARGET_LANG")\",\"url\":\"$(json_escape_inline "$IMAGE")\"}]}]"
+  MSG_IMAGE_LOCAL_PAYLOAD="[{\"role\":\"user\",\"content\":[{\"type\":\"image\",\"source_lang_code\":\"$(json_escape_inline "$IMAGE_SOURCE_LANG")\",\"target_lang_code\":\"$(json_escape_inline "$TARGET_LANG")\",\"url\":\"$(json_escape_inline "$IMAGE")\"}]}]"
   run_translation_case dev-messages-image-local \
     "$LLAMAFILE_BIN" \
     -m "$MODEL" \
@@ -541,7 +588,7 @@ if [[ -n "$IMAGE" ]]; then
     -n "$N_PREDICT"
 
   IMAGE_DATA_URI="$(image_to_data_uri "$IMAGE")"
-  MSG_IMAGE_DATA_PAYLOAD="[{\"role\":\"user\",\"content\":[{\"type\":\"image\",\"source_lang_code\":\"$(json_escape_inline "$SOURCE_LANG")\",\"target_lang_code\":\"$(json_escape_inline "$TARGET_LANG")\",\"url\":\"$(json_escape_inline "$IMAGE_DATA_URI")\"}]}]"
+  MSG_IMAGE_DATA_PAYLOAD="[{\"role\":\"user\",\"content\":[{\"type\":\"image\",\"source_lang_code\":\"$(json_escape_inline "$IMAGE_SOURCE_LANG")\",\"target_lang_code\":\"$(json_escape_inline "$TARGET_LANG")\",\"url\":\"$(json_escape_inline "$IMAGE_DATA_URI")\"}]}]"
   run_translation_case dev-messages-image-datauri \
     "$LLAMAFILE_BIN" \
     -m "$MODEL" \

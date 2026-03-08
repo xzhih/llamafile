@@ -4,6 +4,7 @@
 #include "chatbot.h"
 #include "embedded_resource.h"
 #include "server_mode.h"
+#include "translategemma_request.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -197,6 +198,114 @@ TEST(server_mode_fallback_matches_translategemma_template_shape) {
             "llama",
             "{{ message.content[0].source_lang_code }}"),
         "non-Gemma3 models should not trigger fallback");
+}
+
+TEST(http_translate_text_defaults) {
+    TranslateGemmaJson body = {
+        {"text", "Hello world"},
+    };
+    TranslateGemmaHttpRequest request;
+    std::string error;
+    ASSERT_TRUE(parse_translategemma_http_translate_request(body, &request, &error),
+                "text translate request should parse");
+    ASSERT_FALSE(request.request.has_media, "text translate request should not mark media");
+    ASSERT_TRUE(request.generation.contains("max_tokens"), "default max_tokens should be populated");
+    ASSERT_STR_EQ(std::string("512"), std::to_string(request.max_tokens),
+                  "text translate request should default max_tokens to 512");
+    ASSERT_TRUE(request.generation.contains("stop"), "translate route should append stop tokens");
+}
+
+TEST(http_translate_rejects_both_text_and_image) {
+    TranslateGemmaJson body = {
+        {"text", "Hello"},
+        {"image_data_url", "data:image/png;base64,AAAA"},
+    };
+    TranslateGemmaHttpRequest request;
+    std::string error;
+    ASSERT_FALSE(parse_translategemma_http_translate_request(body, &request, &error),
+                 "translate route should reject both text and image");
+    ASSERT_STR_EQ(std::string("exactly one of 'text' or 'image_data_url' is required"), error,
+                  "translate route mutual exclusion error should be stable");
+}
+
+TEST(http_translate_rejects_non_data_uri_image) {
+    TranslateGemmaJson body = {
+        {"image_data_url", "/tmp/test.png"},
+    };
+    TranslateGemmaHttpRequest request;
+    std::string error;
+    ASSERT_FALSE(parse_translategemma_http_translate_request(body, &request, &error),
+                 "translate route should reject non-data-uri images");
+    ASSERT_STR_EQ(std::string("image references must be data URIs for HTTP translate routes"), error,
+                  "translate route should require data uri images");
+}
+
+TEST(http_translate_accepts_valid_data_uri_image) {
+    const std::string gif_data_uri =
+        "data:image/gif;base64,"
+        "R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==";
+    TranslateGemmaJson body = {
+        {"image_data_url", gif_data_uri},
+    };
+    TranslateGemmaHttpRequest request;
+    std::string error;
+    ASSERT_TRUE(parse_translategemma_http_translate_request(body, &request, &error),
+                "translate route should accept valid image data URIs");
+    ASSERT_TRUE(request.request.has_media, "valid image data uri should mark media");
+    ASSERT_TRUE(!request.request.images.empty(), "valid image data uri should decode image bytes");
+}
+
+TEST(http_translate_messages_supports_translation_instruction) {
+    TranslateGemmaJson body = {
+        {"messages", TranslateGemmaJson::array({
+            {
+                {"role", "user"},
+                {"content", TranslateGemmaJson::array({
+                    {
+                        {"type", "text"},
+                        {"source_lang_code", "en"},
+                        {"target_lang_code", "zh-CN"},
+                        {"text", "Hello"},
+                    },
+                })},
+            },
+        })},
+        {"translation_instruction", "Keep product names in English."},
+    };
+    TranslateGemmaHttpRequest request;
+    std::string error;
+    ASSERT_TRUE(parse_translategemma_http_messages_request(body, &request, &error),
+                "messages translate route should accept translation instruction");
+    ASSERT_STR_EQ(std::string("Keep product names in English."), request.translation_instruction,
+                  "messages route should capture translation instruction");
+}
+
+TEST(http_translate_messages_rejects_streaming_images) {
+    const std::string png_data_uri =
+        "data:image/gif;base64,"
+        "R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==";
+    TranslateGemmaJson body = {
+        {"messages", TranslateGemmaJson::array({
+            {
+                {"role", "user"},
+                {"content", TranslateGemmaJson::array({
+                    {
+                        {"type", "image"},
+                        {"source_lang_code", "auto"},
+                        {"target_lang_code", "zh-CN"},
+                        {"url", png_data_uri},
+                    },
+                })},
+            },
+        })},
+        {"stream", true},
+    };
+    TranslateGemmaHttpRequest request;
+    std::string error;
+    ASSERT_FALSE(parse_translategemma_http_messages_request(body, &request, &error),
+                 "messages route should reject streaming image translation");
+    ASSERT_STR_EQ(std::string("streaming image translation is not supported"), error,
+                  "messages route should reject streaming image translation after validation");
 }
 
 int main(int argc, char *argv[]) {

@@ -2,6 +2,7 @@
 // vi: set et ft=cpp ts=4 sts=4 sw=4 fenc=utf-8 :vi
 
 #include "server_mode.h"
+#include "translategemma_request.h"
 
 #include <array>
 #include <string_view>
@@ -48,8 +49,7 @@ bool has_explicit_chat_template_override(int argc, char **argv) {
 bool should_use_server_safe_gemma_template(std::string_view architecture,
                                            std::string_view chat_template_source) {
     return architecture == "gemma3" &&
-           chat_template_source.find("source_lang_code") != std::string_view::npos &&
-           chat_template_source.find("target_lang_code") != std::string_view::npos;
+           is_translategemma_chat_template_source(chat_template_source);
 }
 
 } // namespace chatbot

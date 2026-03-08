@@ -1,0 +1,23 @@
+diff --git a/tools/server/server-context.h b/tools/server/server-context.h
+--- a/llama.cpp/tools/server/server-context.h
++++ b/llama.cpp/tools/server/server-context.h
+@@ -103,6 +103,8 @@ struct server_routes {
+     server_http_context::handler_t post_completions;
+     server_http_context::handler_t post_completions_oai;
+     server_http_context::handler_t post_chat_completions;
++    server_http_context::handler_t post_translate;
++    server_http_context::handler_t post_translate_messages;
+     server_http_context::handler_t post_responses_oai;
+     server_http_context::handler_t post_anthropic_messages;
+     server_http_context::handler_t post_anthropic_count_tokens;
+@@ -122,6 +124,10 @@ private:
+             const json & data,
+             const std::vector<raw_buffer> & files,
+             task_response_type res_type);
++    std::unique_ptr<server_res_generator> handle_translategemma_request(
++            const server_http_req & req,
++            const json & body,
++            bool messages_mode);
+     std::unique_ptr<server_res_generator> handle_slots_save(const server_http_req & req, int id_slot);
+     std::unique_ptr<server_res_generator> handle_slots_restore(const server_http_req & req, int id_slot);
+     std::unique_ptr<server_res_generator> handle_slots_erase(const server_http_req &, int id_slot);

@@ -90,7 +90,9 @@ These patches integrate llamafile's file handling APIs for loading models from b
 
 | Patch | Description |
 |-------|-------------|
-| `tools_server_server.cpp.patch` | Refactors `main()` to `server_main()` for llamafile integration; adds Metal backend trigger, cosmo_args support, TUI mode handling, and proper exit for Metal async logging |
+| `tools_server_server-context.h.patch` | Adds dedicated TranslateGemma route handlers for `/v1/translate` and `/v1/translate/messages` |
+| `tools_server_server-context.cpp.patch` | Implements TranslateGemma HTTP request parsing/rendering integration on top of the existing server completion pipeline |
+| `tools_server_server.cpp.patch` | Refactors `main()` to `server_main()` for llamafile integration; adds Metal backend trigger, cosmo_args support, TUI mode handling, proper exit for Metal async logging, and registers TranslateGemma translation routes |
 
 ### Vendor Library Fixes
 

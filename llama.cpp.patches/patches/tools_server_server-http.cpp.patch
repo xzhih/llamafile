@@ -1,7 +1,7 @@
 diff --git a/tools/server/server-http.cpp b/tools/server/server-http.cpp
 --- a/llama.cpp/tools/server/server-http.cpp
 +++ b/llama.cpp/tools/server/server-http.cpp
-@@ -4,10 +4,158 @@
+@@ -4,9 +4,157 @@
  
  #include <cpp-httplib/httplib.h>
  
@@ -156,11 +156,10 @@ diff --git a/tools/server/server-http.cpp b/tools/server/server-http.cpp
 +
 +} // namespace
 +#endif
-
+ 
  // auto generated files (see README.md for details)
  #include "index.html.gz.hpp"
- #include "loading.html.hpp"
-@@ -231,7 +379,13 @@
+@@ -231,7 +379,13 @@ bool server_http_context::init(const common_params & params) {
          n_threads_http = std::max(params.n_parallel + 2, (int32_t) std::thread::hardware_concurrency() - 1);
      }
      LOG_INF("%s: using %d threads for HTTP server\n", __func__, n_threads_http);
@@ -174,3 +173,8 @@ diff --git a/tools/server/server-http.cpp b/tools/server/server-http.cpp
  
      //
      // Web UI setup
+@@ -416,4 +570,3 @@ void server_http_context::post(const std::string & path, const server_http_conte
+         process_handler_response(std::move(request), response, res);
+     });
+ }
+-

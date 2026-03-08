@@ -96,7 +96,7 @@ The code has been updated to use the new llama.cpp API:
 
 1. **Image Translation Quality**: TranslateGemma image translation now runs through the mtmd path, but dense screenshots, tables, and long UI captures can still produce incomplete translations because the underlying model is optimized for relatively compact image-text inputs.
 
-2. **Server Mode Boundaries**: `--server` now normalizes packaged `/zip/...` models, bundled `mmproj` files, rejects TranslateGemma-specific `--translate-*` flags, and serves the standard llama.cpp HTTP routes successfully for TranslateGemma. It still does not expose a TranslateGemma-specific translation endpoint; server mode remains aligned with the generic llama.cpp API surface.
+2. **Server Mode Boundaries**: `--server` now normalizes packaged `/zip/...` models, bundled `mmproj` files, rejects TranslateGemma-specific `--translate-*` flags, and serves both the standard llama.cpp HTTP routes and dedicated TranslateGemma translation routes. The specialized routes are `POST /v1/translate` and `POST /v1/translate/messages`.
 
 3. **Official Message Schema**: `--translate-messages-json` now expects the official TranslateGemma message structure:
    - roles must alternate `user` / `assistant`
@@ -111,10 +111,12 @@ The code has been updated to use the new llama.cpp API:
 - `--translate-text` and `--translate-image` render the model's official TranslateGemma chat template.
 - `--translation-instruction` adds a controlled translation preference line for those two modes only.
 - `--translate-messages-json` does not add extra prompting on top of the supplied official messages payload.
-- `--server` keeps the standard llama.cpp HTTP API surface rather than exposing a TranslateGemma-specific translation endpoint.
+- `--server` keeps the standard llama.cpp HTTP API surface and additionally exposes TranslateGemma-specific translation endpoints:
+  - `POST /v1/translate` for high-level text or image translation
+  - `POST /v1/translate/messages` for the official messages schema with optional `translation_instruction`
 - In packaged `.llamafile` runs, bundled model assets are resolved from `/zip/...` automatically and model-backed server runs disable `mmap` when needed.
 - When no explicit `--chat-template` override is supplied, TranslateGemma server startup falls back to the server-safe `gemma` template alias for HTTP chat routes.
-- Server startup, `/health`, `/v1/models`, `/completion`, and `/v1/chat/completions` now work for TranslateGemma on this branch, including packaged `.llamafile` runs.
+- Server startup, `/health`, `/v1/models`, `/completion`, `/v1/chat/completions`, `/v1/translate`, and `/v1/translate/messages` now work for TranslateGemma on this branch, including packaged `.llamafile` runs.
 
 ## Cosmopolitan FLAG System
 
@@ -197,6 +199,6 @@ if (!verbose) {
 ## Future Work
 
 1. Implement full mtmd (multimodal) support for image processing
-2. Decide whether TranslateGemma should keep using the generic llama.cpp HTTP API or grow dedicated translation routes
+2. Add router-mode support for the dedicated TranslateGemma translation routes
 3. Add embeddings support
 4. Test with various model architectures
