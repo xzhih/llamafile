@@ -39,12 +39,13 @@
 
 #include "color.h"
 #include "compute.h"
+#include "embedded_resource.h"
 #include "string.h"
 #include "llamafile.h"
 
 // Version string - should be defined by build system
 #ifndef LLAMAFILE_VERSION_STRING
-#define LLAMAFILE_VERSION_STRING "0.10.0-dev"
+#define LLAMAFILE_VERSION_STRING "0.10.2-dev"
 #endif
 
 namespace lf {
@@ -98,54 +99,6 @@ bool is_base_model() {
     return llama_model_meta_val_str(g_model, "tokenizer.chat_template", 0, 0) == -1;
 }
 
-static void maybe_resolve_embedded_model(common_params *params, bool verbose) {
-#ifdef COSMOCC
-    if (!params) {
-        return;
-    }
-    if (params->model.path.empty()) {
-        return;
-    }
-
-    if (params->model.path.rfind("/zip/", 0) == 0) {
-        params->use_mmap = false;
-    } else {
-        if (params->model.path.find('/') != std::string::npos) {
-            return;
-        }
-
-        if (access(params->model.path.c_str(), R_OK) == 0) {
-            return;
-        }
-
-        std::string zip_path = "/zip/" + params->model.path;
-        if (access(zip_path.c_str(), R_OK) == 0) {
-            if (verbose) {
-                std::fprintf(stderr,
-                             "info: using bundled model from %s (mmap disabled for /zip)\n",
-                             zip_path.c_str());
-            }
-            params->model.path = zip_path;
-            params->use_mmap = false;
-        }
-    }
-
-    if (!params->mmproj.path.empty() &&
-        params->mmproj.path.rfind("/zip/", 0) != 0 &&
-        params->mmproj.path.find('/') == std::string::npos &&
-        access(params->mmproj.path.c_str(), R_OK) != 0) {
-        std::string zip_mmproj = "/zip/" + params->mmproj.path;
-        if (verbose) {
-            std::fprintf(stderr, "info: using bundled vision model from %s\n", zip_mmproj.c_str());
-        }
-        params->mmproj.path = zip_mmproj;
-    }
-#else
-    (void)params;
-    (void)verbose;
-#endif
-}
-
 int main(int argc, char **argv) {
     signal(SIGPIPE, SIG_IGN);
 
@@ -195,7 +148,7 @@ int main(int argc, char **argv) {
         exit(1);
     }
 
-    maybe_resolve_embedded_model(g_params, verbose);
+    normalize_embedded_model_params(g_params, verbose);
 
     if (llamafile_has_metal() && g_params->n_gpu_layers < 0) {
         // if Metal and no ngl was specified, default to INT_MAX

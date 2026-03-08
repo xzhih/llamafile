@@ -27,8 +27,11 @@ The binary will be built at `o/$(MODE)/llamafile_new/llamafile`.
 # With vision model (multimodal)
 ./llamafile -m model.gguf --mmproj vision.gguf
 
-# TUI-only mode (no server)
+# Explicit TUI mode
 ./llamafile -m model.gguf --chat
+
+# HTTP server mode
+./llamafile -m model.gguf --server
 ```
 
 ## File Structure
@@ -93,7 +96,7 @@ The code has been updated to use the new llama.cpp API:
 
 1. **Image Translation Quality**: TranslateGemma image translation now runs through the mtmd path, but dense screenshots, tables, and long UI captures can still produce incomplete translations because the underlying model is optimized for relatively compact image-text inputs.
 
-2. **Server Integration**: The background server feature is not yet implemented. Use the llama.cpp server separately for now.
+2. **Server Mode Boundaries**: `--server` now normalizes packaged `/zip/...` models, bundled `mmproj` files, rejects TranslateGemma-specific `--translate-*` flags, and serves the standard llama.cpp HTTP routes successfully for TranslateGemma. It still does not expose a TranslateGemma-specific translation endpoint; server mode remains aligned with the generic llama.cpp API surface.
 
 3. **Official Message Schema**: `--translate-messages-json` now expects the official TranslateGemma message structure:
    - roles must alternate `user` / `assistant`
@@ -101,13 +104,17 @@ The code has been updated to use the new llama.cpp API:
    - that item must have `type`, `source_lang_code`, `target_lang_code`, and either `text` or `url`
    - remote image URLs are not fetched automatically in translate mode; use a data URI or local file path instead
 
-4. **Metal cache compatibility**: If you switch between builds that share the same llamafile version directory, stale `ggml-metal.dylib` cache can cause startup crashes. This prototype now uses a bumped version namespace (`0.10.1-dev`) to avoid cache collisions with earlier `0.10.0` experiments.
+4. **Metal cache compatibility**: If you switch between builds that share the same llamafile version directory, stale `ggml-metal.dylib` cache can cause startup crashes. This prototype now uses a bumped version namespace (`0.10.2-dev`) to avoid cache collisions with earlier `0.10.0` experiments.
 
 ### TranslateGemma Modes
 
 - `--translate-text` and `--translate-image` render the model's official TranslateGemma chat template.
 - `--translation-instruction` adds a controlled translation preference line for those two modes only.
 - `--translate-messages-json` does not add extra prompting on top of the supplied official messages payload.
+- `--server` keeps the standard llama.cpp HTTP API surface rather than exposing a TranslateGemma-specific translation endpoint.
+- In packaged `.llamafile` runs, bundled model assets are resolved from `/zip/...` automatically and model-backed server runs disable `mmap` when needed.
+- When no explicit `--chat-template` override is supplied, TranslateGemma server startup falls back to the server-safe `gemma` template alias for HTTP chat routes.
+- Server startup, `/health`, `/v1/models`, `/completion`, and `/v1/chat/completions` now work for TranslateGemma on this branch, including packaged `.llamafile` runs.
 
 ## Cosmopolitan FLAG System
 
@@ -190,6 +197,6 @@ if (!verbose) {
 ## Future Work
 
 1. Implement full mtmd (multimodal) support for image processing
-2. Add background server integration
+2. Decide whether TranslateGemma should keep using the generic llama.cpp HTTP API or grow dedicated translation routes
 3. Add embeddings support
 4. Test with various model architectures

@@ -56,6 +56,8 @@ o/$(MODE)/tests/extract_data_uris_test: \
 # ==============================================================================
 
 TRANSLATEGEMMA_TEST_DEPS := \
+	o/$(MODE)/llamafile/embedded_resource.o \
+	o/$(MODE)/llamafile/server_mode.o \
 	o/$(MODE)/llamafile/translategemma.o \
 	o/$(MODE)/llamafile/string.o \
 	$(LLAMA_COMMON_JINJA_DEPS) \

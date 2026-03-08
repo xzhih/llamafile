@@ -2,6 +2,9 @@
 // vi: set et ft=cpp ts=4 sts=4 sw=4 fenc=utf-8 :vi
 
 #include "chatbot.h"
+#include "embedded_resource.h"
+#include "server_mode.h"
+
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -130,6 +133,70 @@ TEST(sanitize_output) {
 TEST(sanitize_output_slash_turn_marker) {
     auto output = sanitize_translategemma_output("Hello\n</start_of_turn>\n");
     ASSERT_STR_EQ(std::string("Hello"), output, "output sanitizer should remove slash turn marker");
+}
+
+TEST(resolve_embedded_path_prefers_zip_bundle_for_missing_bare_name) {
+    auto resolved = resolve_embedded_path("model.gguf", [](std::string_view path) {
+        return path == "/zip/model.gguf";
+    });
+    ASSERT_STR_EQ(std::string("/zip/model.gguf"), resolved.path, "bare filename should resolve to bundled /zip path");
+    ASSERT_TRUE(resolved.is_zip, "resolved bundled model should be marked as zip-backed");
+    ASSERT_TRUE(resolved.resolved_from_bundle, "resolution should report bundled fallback");
+}
+
+TEST(resolve_embedded_path_keeps_existing_host_path) {
+    auto resolved = resolve_embedded_path("/tmp/model.gguf", [](std::string_view path) {
+        return path == "/tmp/model.gguf";
+    });
+    ASSERT_STR_EQ(std::string("/tmp/model.gguf"), resolved.path, "explicit host path should remain unchanged");
+    ASSERT_FALSE(resolved.is_zip, "host path should not be marked as zip-backed");
+    ASSERT_FALSE(resolved.resolved_from_bundle, "host path should not report bundled fallback");
+}
+
+TEST(resolve_embedded_path_recognizes_explicit_zip_path) {
+    auto resolved = resolve_embedded_path("/zip/model.gguf", [](std::string_view) {
+        return false;
+    });
+    ASSERT_STR_EQ(std::string("/zip/model.gguf"), resolved.path, "explicit /zip path should be preserved");
+    ASSERT_TRUE(resolved.is_zip, "explicit /zip path should be marked as zip-backed");
+    ASSERT_FALSE(resolved.resolved_from_bundle, "explicit /zip path should not report implicit fallback");
+}
+
+TEST(server_mode_detects_translate_flags) {
+    char prog[] = "llamafile";
+    char flag1[] = "--server";
+    char flag2[] = "--source-lang";
+    char source[] = "en";
+    char *argv[] = {prog, flag1, flag2, source, nullptr};
+    ASSERT_TRUE(has_translategemma_flags(4, argv), "server mode should reject any TranslateGemma-specific flags");
+}
+
+TEST(server_mode_detects_explicit_chat_template_override) {
+    char prog[] = "llamafile";
+    char flag1[] = "--server";
+    char flag2[] = "--chat-template";
+    char tmpl[] = "chatml";
+    char *argv[] = {prog, flag1, flag2, tmpl, nullptr};
+    ASSERT_TRUE(has_explicit_chat_template_override(4, argv),
+                "explicit --chat-template should disable automatic fallback");
+}
+
+TEST(server_mode_fallback_matches_translategemma_template_shape) {
+    ASSERT_TRUE(
+        should_use_server_safe_gemma_template(
+            "gemma3",
+            "{{ message.content[0].source_lang_code }} -> {{ message.content[0].target_lang_code }}"),
+        "TranslateGemma-style Gemma3 template should trigger server-safe fallback");
+    ASSERT_FALSE(
+        should_use_server_safe_gemma_template(
+            "gemma3",
+            "{{ message.content }}"),
+        "regular Gemma3 chat template should not trigger fallback");
+    ASSERT_FALSE(
+        should_use_server_safe_gemma_template(
+            "llama",
+            "{{ message.content[0].source_lang_code }}"),
+        "non-Gemma3 models should not trigger fallback");
 }
 
 int main(int argc, char *argv[]) {

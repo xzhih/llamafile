@@ -26,7 +26,7 @@ LLAMAFILE_HDRS := \
 
 LLAMAFILE_VERSION_MAJOR := 0
 LLAMAFILE_VERSION_MINOR := 10
-LLAMAFILE_VERSION_PATCH := 1
+LLAMAFILE_VERSION_PATCH := 2
 LLAMAFILE_VERSION_STRING := $(LLAMAFILE_VERSION_MAJOR).$(LLAMAFILE_VERSION_MINOR).$(LLAMAFILE_VERSION_PATCH)-dev
 
 # ==============================================================================
@@ -138,9 +138,11 @@ LLAMAFILE_SRCS_CPP := \
 	llamafile/chatbot_repl.cpp \
 	llamafile/compute.cpp \
 	llamafile/datauri.cpp \
+	llamafile/embedded_resource.cpp \
 	llamafile/extract_data_uris.cpp \
 	llamafile/image.cpp \
 	llamafile/llama.cpp \
+	llamafile/server_mode.cpp \
 	llamafile/string.cpp \
 	llamafile/translategemma.cpp \
 	llamafile/translategemma_mode.cpp \

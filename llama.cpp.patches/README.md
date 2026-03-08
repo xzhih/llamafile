@@ -51,6 +51,7 @@ Cosmopolitan libc has specific behaviors with condition variables and signals th
 | Patch | Description |
 |-------|-------------|
 | `common_log.cpp.patch` | Blocks `SIGINT`/`SIGTERM` on logger thread to prevent `EINTR` exceptions; uses `wait_for()` instead of `wait()` to work around XNU futex timeout bug (~72 minute expiry) |
+| `tools_server_server-http.cpp.patch` | Replaces the Cosmopolitan HTTP task queue with pthread workers that use 1 MiB stacks and page-sized guards |
 | `tools_server_server-queue.cpp.patch` | Same threading fixes for server queue: signal masking and `wait_for()` timeouts |
 | `vendor_cpp-httplib_httplib.cpp.patch` | Fixes httplib thread pool with `wait_for()` instead of `wait()` for XNU futex compatibility |
 

@@ -1,0 +1,176 @@
+diff --git a/tools/server/server-http.cpp b/tools/server/server-http.cpp
+--- a/llama.cpp/tools/server/server-http.cpp
++++ b/llama.cpp/tools/server/server-http.cpp
+@@ -4,10 +4,158 @@
+ 
+ #include <cpp-httplib/httplib.h>
+ 
++#include <chrono>
++#include <condition_variable>
++#include <csignal>
++#include <cstring>
++#include <deque>
+ #include <functional>
++#include <mutex>
++#include <pthread.h>
+ #include <string>
+ #include <thread>
++#include <unistd.h>
++#include <vector>
++
++#ifdef __COSMOPOLITAN__
++namespace {
++
++constexpr size_t k_cosmo_http_worker_stack_size = 1u << 20;
++
++static size_t get_cosmo_http_worker_guard_size() {
++    long page_size = sysconf(_SC_PAGESIZE);
++    return page_size > 0 ? static_cast<size_t>(page_size) : 4096u;
++}
++
++class cosmo_http_task_queue final : public httplib::TaskQueue {
++public:
++    explicit cosmo_http_task_queue(size_t n_threads) {
++        workers_.reserve(n_threads);
++        for (size_t i = 0; i < n_threads; ++i) {
++            pthread_attr_t attr;
++            int rc = pthread_attr_init(&attr);
++            if (rc != 0) {
++                SRV_ERR("pthread_attr_init failed for HTTP worker %zu: %s\n", i, std::strerror(rc));
++                abort_startup();
++                return;
++            }
++            rc = pthread_attr_setstacksize(&attr, k_cosmo_http_worker_stack_size);
++            if (rc != 0) {
++                pthread_attr_destroy(&attr);
++                SRV_ERR("pthread_attr_setstacksize failed for HTTP worker %zu: %s\n", i, std::strerror(rc));
++                abort_startup();
++                return;
++            }
++            rc = pthread_attr_setguardsize(&attr, get_cosmo_http_worker_guard_size());
++            if (rc != 0) {
++                SRV_WRN("pthread_attr_setguardsize failed for HTTP worker %zu: %s\n", i, std::strerror(rc));
++            }
++
++            pthread_t worker = {};
++            rc = pthread_create(&worker, &attr, &cosmo_http_task_queue::worker_entry, this);
++            pthread_attr_destroy(&attr);
++            if (rc != 0) {
++                SRV_ERR("pthread_create failed for HTTP worker %zu: %s\n", i, std::strerror(rc));
++                abort_startup();
++                return;
++            }
++
++            workers_.push_back(worker);
++        }
++    }
++
++    ~cosmo_http_task_queue() override {
++        shutdown();
++    }
++
++    bool enqueue(std::function<void()> fn) override {
++        {
++            std::lock_guard<std::mutex> lock(mutex_);
++            if (shutdown_ || workers_.empty()) {
++                return false;
++            }
++            jobs_.push_back(std::move(fn));
++        }
++        condition_.notify_one();
++        return true;
++    }
++
++    void shutdown() override {
++        std::vector<pthread_t> workers;
++        {
++            std::lock_guard<std::mutex> lock(mutex_);
++            if (joined_) {
++                return;
++            }
++            shutdown_ = true;
++            joined_ = true;
++            workers = workers_;
++        }
++        condition_.notify_all();
++        for (pthread_t worker : workers) {
++            pthread_join(worker, nullptr);
++        }
++    }
++
++private:
++    static void * worker_entry(void * arg) {
++        static_cast<cosmo_http_task_queue *>(arg)->run_worker();
++        return nullptr;
++    }
++
++    void run_worker() {
++        sigset_t block_mask;
++        sigemptyset(&block_mask);
++        sigaddset(&block_mask, SIGINT);
++        sigaddset(&block_mask, SIGTERM);
++        int rc = pthread_sigmask(SIG_BLOCK, &block_mask, nullptr);
++        if (rc != 0) {
++            SRV_WRN("pthread_sigmask failed for HTTP worker: %s\n", std::strerror(rc));
++        }
++
++        while (true) {
++            std::function<void()> job;
++            {
++                std::unique_lock<std::mutex> lock(mutex_);
++                while (jobs_.empty() && !shutdown_) {
++                    condition_.wait_for(lock, std::chrono::seconds(30));
++                }
++                if (shutdown_ && jobs_.empty()) {
++                    break;
++                }
++                job = std::move(jobs_.front());
++                jobs_.pop_front();
++            }
++            job();
++        }
++    }
++
++    void abort_startup() {
++        std::vector<pthread_t> workers;
++        {
++            std::lock_guard<std::mutex> lock(mutex_);
++            shutdown_ = true;
++            joined_ = true;
++            workers = workers_;
++            workers_.clear();
++        }
++        condition_.notify_all();
++        for (pthread_t worker : workers) {
++            pthread_join(worker, nullptr);
++        }
++    }
++
++    std::mutex mutex_;
++    std::condition_variable condition_;
++    std::deque<std::function<void()>> jobs_;
++    std::vector<pthread_t> workers_;
++    bool shutdown_ = false;
++    bool joined_ = false;
++};
++
++} // namespace
++#endif
+
+ // auto generated files (see README.md for details)
+ #include "index.html.gz.hpp"
+ #include "loading.html.hpp"
+@@ -231,7 +379,13 @@
+         n_threads_http = std::max(params.n_parallel + 2, (int32_t) std::thread::hardware_concurrency() - 1);
+     }
+     LOG_INF("%s: using %d threads for HTTP server\n", __func__, n_threads_http);
++#ifdef __COSMOPOLITAN__
++    LOG_INF("%s: using Cosmopolitan HTTP worker queue with %zu byte stacks\n",
++            __func__, k_cosmo_http_worker_stack_size);
++    srv->new_task_queue = [n_threads_http] { return new cosmo_http_task_queue(n_threads_http); };
++#else
+     srv->new_task_queue = [n_threads_http] { return new httplib::ThreadPool(n_threads_http); };
++#endif
+ 
+     //
+     // Web UI setup

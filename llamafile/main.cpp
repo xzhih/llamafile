@@ -30,11 +30,17 @@
 //
 
 #include "chatbot.h"
+#include "embedded_resource.h"
 #include "llamafile.h"
+#include "server_mode.h"
+
+#include "gguf.h"
+
 #include <cstdio>
 #include <iostream>
 #include <set>
 #include <string>
+#include <vector>
 
 #ifdef COSMOCC
 #include <cosmo.h>
@@ -47,6 +53,138 @@ enum Program {
 };
 
 int server_main(int argc, char **argv);
+
+namespace {
+
+constexpr const char *kServerTranslateModeError =
+    "TranslateGemma CLI/TUI flags are not supported with --server; use the existing HTTP API instead";
+
+struct PreparedServerArgs {
+    std::vector<std::string> args;
+    std::vector<std::string> info_messages;
+};
+
+struct ServerModelMetadata {
+    std::string architecture;
+    std::string chat_template_source;
+};
+
+static std::string_view arg_name(std::string_view arg) {
+    const size_t eq = arg.find('=');
+    return eq == std::string_view::npos ? arg : arg.substr(0, eq);
+}
+
+static bool read_server_model_metadata(const std::string &model_path, ServerModelMetadata *out) {
+    if (!out || model_path.empty()) {
+        return false;
+    }
+
+    const gguf_init_params params = {
+        /*.no_alloc = */ true,
+        /*.ctx      = */ nullptr,
+    };
+    gguf_context *ctx = gguf_init_from_file(model_path.c_str(), params);
+    if (!ctx) {
+        return false;
+    }
+
+    const int arch_key = gguf_find_key(ctx, "general.architecture");
+    if (arch_key >= 0 && gguf_get_kv_type(ctx, arch_key) == GGUF_TYPE_STRING) {
+        out->architecture = gguf_get_val_str(ctx, arch_key);
+    }
+
+    const int tmpl_key = gguf_find_key(ctx, "tokenizer.chat_template");
+    if (tmpl_key >= 0 && gguf_get_kv_type(ctx, tmpl_key) == GGUF_TYPE_STRING) {
+        out->chat_template_source = gguf_get_val_str(ctx, tmpl_key);
+    }
+
+    gguf_free(ctx);
+    return !out->architecture.empty() || !out->chat_template_source.empty();
+}
+
+static bool prepare_server_args(int argc, char **argv, PreparedServerArgs *out, std::string *error) {
+    if (!out) {
+        if (error) {
+            *error = "internal error: missing server argument buffer";
+        }
+        return false;
+    }
+
+    out->args.clear();
+    out->info_messages.clear();
+    out->args.reserve(argc + 4);
+    for (int i = 0; i < argc; ++i) {
+        out->args.emplace_back(argv[i]);
+    }
+
+    bool needs_no_mmap = false;
+    bool has_explicit_template = lf::chatbot::has_explicit_chat_template_override(argc, argv);
+    std::string resolved_model_path;
+
+    for (size_t i = 1; i < out->args.size(); ++i) {
+        const std::string_view name = arg_name(out->args[i]);
+        if (name != "-m" && name != "--model" && name != "--mmproj") {
+            continue;
+        }
+
+        bool inline_value = false;
+        size_t value_index = i;
+        std::string value;
+        const size_t eq = out->args[i].find('=');
+        if (eq != std::string::npos) {
+            inline_value = true;
+            value = out->args[i].substr(eq + 1);
+        } else {
+            if (i + 1 >= out->args.size()) {
+                continue;
+            }
+            value_index = i + 1;
+            value = out->args[value_index];
+        }
+
+        const auto resolved = lf::chatbot::resolve_embedded_path(value);
+        if (!resolved.path.empty() && resolved.path != value) {
+            if (inline_value) {
+                out->args[i] = std::string(name) + "=" + resolved.path;
+            } else {
+                out->args[value_index] = resolved.path;
+            }
+        }
+
+        if (name == "-m" || name == "--model") {
+            resolved_model_path = resolved.path.empty() ? value : resolved.path;
+            if (resolved.is_zip) {
+                needs_no_mmap = true;
+            }
+            if (resolved.resolved_from_bundle) {
+                out->info_messages.emplace_back(
+                    "info: using bundled model from " + resolved.path + " (mmap disabled for /zip)");
+            }
+        } else if (name == "--mmproj" && resolved.resolved_from_bundle) {
+            out->info_messages.emplace_back("info: using bundled vision model from " + resolved.path);
+        }
+    }
+
+    if (needs_no_mmap) {
+        out->args.emplace_back("--no-mmap");
+    }
+
+    if (!has_explicit_template && !resolved_model_path.empty()) {
+        ServerModelMetadata metadata;
+        if (read_server_model_metadata(resolved_model_path, &metadata) &&
+            lf::chatbot::should_use_server_safe_gemma_template(
+                metadata.architecture, metadata.chat_template_source)) {
+            out->args.emplace_back("--chat-template");
+            out->args.emplace_back("gemma");
+            out->info_messages.emplace_back(
+                "info: using server-safe chat template 'gemma' for TranslateGemma HTTP routes");
+        }
+    }
+
+    return true;
+}
+
+} // namespace
 
 static enum Program determine_program(char *argv[]) {
     enum Program prog = PROG_UNKNOWN;
@@ -101,8 +239,21 @@ int main(int argc, char **argv) {
     // Load arguments from zip file if present (for bundled llamafiles)
     argc = cosmo_args("/zip/.args", &argv);
 
+    enum Program prog = determine_program(argv);
+    if (prog == PROG_SERVER && lf::chatbot::has_translategemma_flags(argc, argv)) {
+        std::fprintf(stderr, "error: %s\n", kServerTranslateModeError);
+        return 64;
+    }
+
     std::string translate_error;
     if (!lf::chatbot::parse_translategemma_options(argc, argv, &lf::chatbot::g_translate_options, &translate_error)) {
+        std::fprintf(stderr, "error: %s\n", translate_error.c_str());
+        return 64;
+    }
+
+    PreparedServerArgs prepared_server_args;
+    if (prog == PROG_SERVER &&
+        !prepare_server_args(argc, argv, &prepared_server_args, &translate_error)) {
         std::fprintf(stderr, "error: %s\n", translate_error.c_str());
         return 64;
     }
@@ -116,8 +267,6 @@ int main(int argc, char **argv) {
     // The llamafile_has_* functions use lazy initialization via cosmo_once()
     llamafile_has_gpu();
 
-    enum Program prog = determine_program(argv);
-
     // remove arguments which llama.cpp does not support
     // (first set: flags, second set: arguments with params)
     argc = removeArgs(argc, argv, 
@@ -126,7 +275,23 @@ int main(int argc, char **argv) {
                     );
 
     if (prog == PROG_SERVER) {
-        return server_main(argc, argv);
+        for (const auto &message : prepared_server_args.info_messages) {
+            std::fprintf(stderr, "%s\n", message.c_str());
+        }
+
+        std::vector<char *> server_argv;
+        server_argv.reserve(prepared_server_args.args.size() + 1);
+        for (auto &arg : prepared_server_args.args) {
+            server_argv.push_back(arg.data());
+        }
+        server_argv.push_back(nullptr);
+
+        int server_argc = removeArgs(
+            static_cast<int>(prepared_server_args.args.size()),
+            server_argv.data(),
+            {"--server"},
+            {"--gpu"});
+        return server_main(server_argc, server_argv.data());
     }
 
     // Chat mode (explicit --chat or default when no -p/-f/--random-prompt)

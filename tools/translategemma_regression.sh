@@ -11,6 +11,7 @@ Purpose:
   1) dev binary text/image translation
   2) packaged .llamafile text/image translation (implicit and explicit /zip)
   3) --translate-messages-json text/image (local path + data URI)
+  4) optional dev + packaged server smoke tests (/health, /v1/models, /completion, /v1/chat/completions)
 
 Options:
   --model PATH              GGUF model path (required)
@@ -27,6 +28,7 @@ Options:
   --expect SUBSTR           expected substring in translation output (optional)
   --n-predict N             max generated tokens (default: 8)
   --runs N                  repeat count for packaged implicit path (default: 2)
+  --server-smoke            run optional server smoke tests for TranslateGemma HTTP integration
   --timeout-sec N           timeout for each run (default: 120)
   --require-metal yes|no    require Metal backend evidence in stderr (default: yes on macOS)
   --keep-artifacts          keep temporary packaging directory
@@ -96,6 +98,7 @@ TEXT="Hello world"
 EXPECT_SUBSTR=""
 N_PREDICT="8"
 RUNS="2"
+RUN_SERVER_SMOKE="0"
 TIMEOUT_SEC="120"
 KEEP_ARTIFACTS="0"
 REQUIRE_METAL="auto"
@@ -116,6 +119,7 @@ while [[ $# -gt 0 ]]; do
     --expect) EXPECT_SUBSTR="${2-}"; shift 2 ;;
     --n-predict) N_PREDICT="${2-}"; shift 2 ;;
     --runs) RUNS="${2-}"; shift 2 ;;
+    --server-smoke) RUN_SERVER_SMOKE="1"; shift ;;
     --timeout-sec) TIMEOUT_SEC="${2-}"; shift 2 ;;
     --require-metal) REQUIRE_METAL="${2-}"; shift 2 ;;
     --keep-artifacts) KEEP_ARTIFACTS="1"; shift ;;
@@ -251,6 +255,186 @@ run_translation_case() {
   rm -f "$stdout_file" "$stderr_file"
 }
 
+SERVER_PORT_NEXT=18090
+
+stop_server() {
+  local pid="$1"
+  if kill -0 "$pid" 2>/dev/null; then
+    kill "$pid" 2>/dev/null || true
+    for _ in $(seq 1 20); do
+      if ! kill -0 "$pid" 2>/dev/null; then
+        break
+      fi
+      sleep 0.25
+    done
+    if kill -0 "$pid" 2>/dev/null; then
+      kill -9 "$pid" 2>/dev/null || true
+    fi
+  fi
+  wait "$pid" >/dev/null 2>&1 || true
+}
+
+extract_completion_content() {
+  local path="$1"
+  if command -v jq >/dev/null 2>&1; then
+    jq -r '.content // empty' "$path"
+    return
+  fi
+  python3 - "$path" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as fh:
+    data = json.load(fh)
+print(data.get("content", ""))
+PY
+}
+
+extract_chat_content() {
+  local path="$1"
+  if command -v jq >/dev/null 2>&1; then
+    jq -r '.choices[0].message.content // empty' "$path"
+    return
+  fi
+  python3 - "$path" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as fh:
+    data = json.load(fh)
+choices = data.get("choices") or []
+message = choices[0].get("message", {}) if choices else {}
+print(message.get("content", ""))
+PY
+}
+
+run_server_case() {
+  local name="$1"
+  shift
+
+  local port="$SERVER_PORT_NEXT"
+  SERVER_PORT_NEXT=$((SERVER_PORT_NEXT + 1))
+
+  local log_file body_file http_code completion_text chat_text
+  log_file="$(mktemp /tmp/${name}.server.XXXXXX)"
+  body_file="$(mktemp /tmp/${name}.body.XXXXXX)"
+
+  "$@" \
+    --server \
+    --no-warmup \
+    --host 127.0.0.1 \
+    --port "$port" \
+    >"$log_file" 2>&1 &
+  local server_pid="$!"
+
+  local ready=0
+  for _ in $(seq 1 240); do
+    if curl -sf "http://127.0.0.1:$port/health" >/dev/null; then
+      ready=1
+      break
+    fi
+    if ! kill -0 "$server_pid" 2>/dev/null; then
+      break
+    fi
+    sleep 0.25
+  done
+
+  if [[ "$ready" != "1" ]]; then
+    echo "FAIL [$name]: server failed to start" >&2
+    tail -n 80 "$log_file" >&2 || true
+    FAIL_COUNT=$((FAIL_COUNT + 1))
+    stop_server "$server_pid"
+    rm -f "$log_file" "$body_file"
+    return
+  fi
+
+  if [[ "$REQUIRE_METAL" == "yes" ]]; then
+    if ! grep -Eq 'registered backend MTL|ggml_metal_device_init' "$log_file"; then
+      echo "FAIL [$name]: Metal backend evidence not found in server log" >&2
+      tail -n 80 "$log_file" >&2 || true
+      FAIL_COUNT=$((FAIL_COUNT + 1))
+      stop_server "$server_pid"
+      rm -f "$log_file" "$body_file"
+      return
+    fi
+  fi
+
+  http_code="$(curl -sS -o "$body_file" -w '%{http_code}' "http://127.0.0.1:$port/v1/models" || true)"
+  if [[ "$http_code" != "200" ]] || ! grep -q '"models"' "$body_file"; then
+    echo "FAIL [$name]: /v1/models returned HTTP $http_code" >&2
+    cat "$body_file" >&2 || true
+    FAIL_COUNT=$((FAIL_COUNT + 1))
+    stop_server "$server_pid"
+    rm -f "$log_file" "$body_file"
+    return
+  fi
+
+  local completion_payload
+  completion_payload="{\"prompt\":\"$(json_escape_inline "Say hello briefly.")\",\"n_predict\":${N_PREDICT},\"temperature\":0,\"stream\":false}"
+  http_code="$(curl -sS -o "$body_file" -w '%{http_code}' \
+    -H 'Content-Type: application/json' \
+    -d "$completion_payload" \
+    "http://127.0.0.1:$port/completion" || true)"
+  completion_text="$(extract_completion_content "$body_file" | strip_cr)"
+  if [[ "$http_code" != "200" ]] || [[ -z "$completion_text" ]]; then
+    echo "FAIL [$name]: /completion returned HTTP $http_code with empty content" >&2
+    cat "$body_file" >&2 || true
+    FAIL_COUNT=$((FAIL_COUNT + 1))
+    stop_server "$server_pid"
+    rm -f "$log_file" "$body_file"
+    return
+  fi
+
+  local chat_payload
+  chat_payload="{\"messages\":[{\"role\":\"user\",\"content\":\"Reply with a short greeting.\"}],\"max_tokens\":${N_PREDICT},\"temperature\":0,\"stream\":false}"
+  http_code="$(curl -sS -o "$body_file" -w '%{http_code}' \
+    -H 'Content-Type: application/json' \
+    -d "$chat_payload" \
+    "http://127.0.0.1:$port/v1/chat/completions" || true)"
+  chat_text="$(extract_chat_content "$body_file" | strip_cr)"
+  if [[ "$http_code" != "200" ]] || [[ -z "$chat_text" ]]; then
+    echo "FAIL [$name]: /v1/chat/completions returned HTTP $http_code with empty content" >&2
+    cat "$body_file" >&2 || true
+    FAIL_COUNT=$((FAIL_COUNT + 1))
+    stop_server "$server_pid"
+    rm -f "$log_file" "$body_file"
+    return
+  fi
+
+  local has_mmproj_arg=0
+  local arg=""
+  for arg in "$@"; do
+    if [[ "$arg" == "--mmproj" ]] || [[ "$arg" == --mmproj=* ]]; then
+      has_mmproj_arg=1
+      break
+    fi
+  done
+
+  if [[ "$has_mmproj_arg" == "1" ]] && [[ -n "$IMAGE" ]]; then
+    local image_data_uri image_payload
+    image_data_uri="$(image_to_data_uri "$IMAGE")"
+    image_payload="{\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Describe this image briefly.\"},{\"type\":\"image_url\",\"image_url\":{\"url\":\"$(json_escape_inline "$image_data_uri")\"}}]}],\"max_tokens\":${N_PREDICT},\"temperature\":0,\"stream\":false}"
+    http_code="$(curl -sS -o "$body_file" -w '%{http_code}' \
+      -H 'Content-Type: application/json' \
+      -d "$image_payload" \
+      "http://127.0.0.1:$port/v1/chat/completions" || true)"
+    chat_text="$(extract_chat_content "$body_file" | strip_cr)"
+    if [[ "$http_code" != "200" ]] || [[ -z "$chat_text" ]]; then
+      echo "FAIL [$name]: multimodal /v1/chat/completions returned HTTP $http_code with empty content" >&2
+      cat "$body_file" >&2 || true
+      FAIL_COUNT=$((FAIL_COUNT + 1))
+      stop_server "$server_pid"
+      rm -f "$log_file" "$body_file"
+      return
+    fi
+  fi
+
+  echo "PASS [$name]: completion/chat routes responded"
+  PASS_COUNT=$((PASS_COUNT + 1))
+  stop_server "$server_pid"
+  rm -f "$log_file" "$body_file"
+}
+
 MODEL_BASENAME="$(basename "$MODEL")"
 MMPROJ_BASENAME="$(basename "$MMPROJ")"
 
@@ -265,7 +449,13 @@ fi
 echo "dev binary:   $LLAMAFILE_BIN"
 echo "packaged:     $PACKAGED"
 echo "requireMetal: $REQUIRE_METAL"
+echo "serverSmoke:  $RUN_SERVER_SMOKE"
 echo
+
+if [[ "$RUN_SERVER_SMOKE" != "1" ]]; then
+  echo "note: server smoke is skipped by default because it launches long-running local HTTP server processes"
+  echo
+fi
 
 run_translation_case dev-text \
   "$LLAMAFILE_BIN" \
@@ -300,7 +490,7 @@ run_translation_case packaged-explicit-text-abs \
   --target-lang "$TARGET_LANG" \
   -n "$N_PREDICT"
 
-MSG_TEXT_PAYLOAD="[{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"$(json_escape_inline "$TEXT")\"}]}]"
+MSG_TEXT_PAYLOAD="[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"source_lang_code\":\"$(json_escape_inline "$SOURCE_LANG")\",\"target_lang_code\":\"$(json_escape_inline "$TARGET_LANG")\",\"text\":\"$(json_escape_inline "$TEXT")\"}]}]"
 
 run_translation_case dev-messages-text \
   "$LLAMAFILE_BIN" \
@@ -313,6 +503,15 @@ run_translation_case packaged-messages-text-zip \
   -m "/zip/$MODEL_BASENAME" \
   --translate-messages-json "$MSG_TEXT_PAYLOAD" \
   -n "$N_PREDICT"
+
+if [[ "$RUN_SERVER_SMOKE" == "1" ]]; then
+  run_server_case dev-server-text \
+    "$LLAMAFILE_BIN" \
+    -m "$MODEL"
+
+  run_server_case packaged-server-text \
+    "$PACKAGED"
+fi
 
 if [[ -n "$IMAGE" ]]; then
   run_translation_case dev-image \
@@ -333,7 +532,7 @@ if [[ -n "$IMAGE" ]]; then
     --target-lang "$TARGET_LANG" \
     -n "$N_PREDICT"
 
-  MSG_IMAGE_LOCAL_PAYLOAD="[{\"role\":\"user\",\"content\":[{\"type\":\"input_image\",\"url\":\"$(json_escape_inline "$IMAGE")\"},{\"type\":\"input_text\",\"text\":\"$(json_escape_inline "Translate all visible text to $TARGET_LANG.")\"}]}]"
+  MSG_IMAGE_LOCAL_PAYLOAD="[{\"role\":\"user\",\"content\":[{\"type\":\"image\",\"source_lang_code\":\"$(json_escape_inline "$SOURCE_LANG")\",\"target_lang_code\":\"$(json_escape_inline "$TARGET_LANG")\",\"url\":\"$(json_escape_inline "$IMAGE")\"}]}]"
   run_translation_case dev-messages-image-local \
     "$LLAMAFILE_BIN" \
     -m "$MODEL" \
@@ -342,13 +541,24 @@ if [[ -n "$IMAGE" ]]; then
     -n "$N_PREDICT"
 
   IMAGE_DATA_URI="$(image_to_data_uri "$IMAGE")"
-  MSG_IMAGE_DATA_PAYLOAD="[{\"role\":\"user\",\"content\":[{\"type\":\"image_url\",\"image_url\":{\"url\":\"$(json_escape_inline "$IMAGE_DATA_URI")\"}},{\"type\":\"input_text\",\"text\":\"$(json_escape_inline "Translate all visible text to $TARGET_LANG.")\"}]}]"
+  MSG_IMAGE_DATA_PAYLOAD="[{\"role\":\"user\",\"content\":[{\"type\":\"image\",\"source_lang_code\":\"$(json_escape_inline "$SOURCE_LANG")\",\"target_lang_code\":\"$(json_escape_inline "$TARGET_LANG")\",\"url\":\"$(json_escape_inline "$IMAGE_DATA_URI")\"}]}]"
   run_translation_case dev-messages-image-datauri \
     "$LLAMAFILE_BIN" \
     -m "$MODEL" \
     --mmproj "$MMPROJ" \
     --translate-messages-json "$MSG_IMAGE_DATA_PAYLOAD" \
     -n "$N_PREDICT"
+
+  if [[ "$RUN_SERVER_SMOKE" == "1" ]]; then
+    run_server_case dev-server-mmproj \
+      "$LLAMAFILE_BIN" \
+      -m "$MODEL" \
+      --mmproj "$MMPROJ"
+
+    run_server_case packaged-server-mmproj \
+      "$PACKAGED" \
+      --mmproj "/zip/$MMPROJ_BASENAME"
+  fi
 fi
 
 echo
