@@ -104,7 +104,7 @@ The code has been updated to use the new llama.cpp API:
    - that item must have `type`, `source_lang_code`, `target_lang_code`, and either `text` or `url`
    - remote image URLs are not fetched automatically in translate mode; use a data URI or local file path instead
 
-4. **Metal cache compatibility**: If you switch between builds that share the same llamafile version directory, stale `ggml-metal.dylib` cache can cause startup crashes. This prototype now uses a bumped version namespace (`0.10.2-dev`) to avoid cache collisions with earlier `0.10.0` experiments.
+4. **Metal cache compatibility**: If you switch between builds that share the same llamafile version directory, stale `ggml-metal.dylib` cache can cause startup crashes. This prototype now uses a bumped version namespace (`0.10.4-dev`) to avoid cache collisions with earlier `0.10.0` experiments.
 
 ### TranslateGemma Modes
 

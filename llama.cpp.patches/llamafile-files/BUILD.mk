@@ -349,7 +349,14 @@ TOOL_LLAMAFILE_OBJS := \
 	o/$(MODE)/llamafile/llamafile.o \
 	o/$(MODE)/llamafile/metal.o \
 	o/$(MODE)/llamafile/cuda.o \
-	o/$(MODE)/llamafile/zip.o
+	o/$(MODE)/llamafile/zip.o \
+	o/$(MODE)/llamafile/string.o \
+	o/$(MODE)/llamafile/datauri.o \
+	o/$(MODE)/llamafile/image.o \
+	o/$(MODE)/llamafile/xterm.o \
+	o/$(MODE)/llamafile/translategemma_render.o \
+	o/$(MODE)/llamafile/translategemma_request.o \
+	o/$(MODE)/third_party/stb/stb_image_resize2.o
 
 # Server objects depend on generated assets
 $(TOOL_SERVER_OBJS): $(SERVER_ASSETS) llamafile/llamafile.h

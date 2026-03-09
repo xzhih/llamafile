@@ -39,9 +39,26 @@ o/$(MODE)/:	o/$(MODE)/llamafile	\
 		o/$(MODE)/third_party/zipalign
 
 .PHONY: install
-install: o/$(MODE)/llamafile/llamafile
+install: \
+		o/$(MODE)/llamafile/llamafile \
+		o/$(MODE)/llama.cpp/server/llama-server \
+		o/$(MODE)/whisperfile/whisperfile \
+		o/$(MODE)/whisperfile/whisper-server \
+		o/$(MODE)/whisperfile/stream \
+		o/$(MODE)/whisperfile/mic2txt \
+		o/$(MODE)/whisperfile/mic2raw \
+		o/$(MODE)/third_party/zipalign/zipalign
 	mkdir -p $(PREFIX)/bin
 	$(INSTALL) o/$(MODE)/llamafile/llamafile $(PREFIX)/bin/llamafile
+	$(INSTALL) o/$(MODE)/llama.cpp/server/llama-server $(PREFIX)/bin/llama-server
+	$(INSTALL) o/$(MODE)/whisperfile/whisperfile $(PREFIX)/bin/whisperfile
+	$(INSTALL) o/$(MODE)/whisperfile/whisper-server $(PREFIX)/bin/whisper-server
+	$(INSTALL) o/$(MODE)/whisperfile/stream $(PREFIX)/bin/stream
+	$(INSTALL) o/$(MODE)/whisperfile/mic2txt $(PREFIX)/bin/mic2txt
+	$(INSTALL) o/$(MODE)/whisperfile/mic2raw $(PREFIX)/bin/mic2raw
+	$(INSTALL) o/$(MODE)/third_party/zipalign/zipalign $(PREFIX)/bin/zipalign
+	$(INSTALL) build/llamafile-convert $(PREFIX)/bin/llamafile-convert
+	$(INSTALL) build/llamafile-upgrade-engine $(PREFIX)/bin/llamafile-upgrade-engine
 
 .PHONY: check
 check: o/$(MODE)/tests

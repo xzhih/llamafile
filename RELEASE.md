@@ -38,10 +38,14 @@ The easiest way to create the release zip is to:
 
 `make install PREFIX=<preferred_dir>/llamafile-<version>`
 
-After the directory is created, you will want to bundle the built shared libraries into the following release binaries:
+This now stages the core release binaries and helper scripts into `<preferred_dir>/llamafile-<version>/bin`,
+including `llamafile`, `llama-server`, `whisperfile`, `whisper-server`, `stream`, `mic2txt`, `mic2raw`,
+`zipalign`, `llamafile-convert`, and `llamafile-upgrade-engine`.
+
+After the directory is created, you will want to bundle the built shared libraries into the release binaries that need
+runtime GPU backends, such as:
 
 - `llamafile`
-- `localscore`
 - `whisperfile`
 
 You can do this for each binary with a command like the following:
@@ -53,21 +57,8 @@ For llamafile and whisperfile you can do the following:
 `zipalign -j0 llamafile ggml-cuda.so ggml-rocm.so ggml-cuda.dll ggml-rocm.dll`
 `zipalign -j0 whisperfile ggml-cuda.so ggml-rocm.so ggml-cuda.dll ggml-rocm.dll`
 
-After doing this, delete the ggml-cuda.so and ggml-cuda.dll files from the directory, and copy + rename the ggml-cuda.localscore.so and ggml-cuda.localscore.dll files to the directory.
-
-```
-rm <path_to>/llamafile-<version>/bin/ggml-cuda.so <path_to>/llamafile-<version>/bin/ggml-cuda.dll
-cp ~/ggml-cuda.localscore.so <path_to>/llamafile-<version>/bin/ggml-cuda.so
-cp ~/ggml-cuda.localscore.dll <path_to>/llamafile-<version>/bin/ggml-cuda.dll
-```
-
-For localscore you can now package it:
-
-`zipalign -j0 localscore ggml-cuda.so ggml-rocm.so ggml-cuda.dll ggml-rocm.dll`
-
-After you have done this for all the binaries, you will want to get the existing PDFs (from the prior release) and add them to the directory:
-
-`cp <path_to>/doc/*.pdf <path_to>/llamafile-<version>/share/doc/llamafile/`
+If you build additional binaries outside the default install set, package them the same way after copying them into
+`<path_to>/llamafile-<version>/bin`.
 
 The zip is structured as follows.
 
@@ -75,41 +66,16 @@ The zip is structured as follows.
 llamafile-<version>
 |-- README.md
 |-- bin
+|   |-- llama-server
 |   |-- llamafile
-|   |-- llamafile-bench
 |   |-- llamafile-convert
-|   |-- llamafile-imatrix
-|   |-- llamafile-perplexity
-|   |-- llamafile-quantize
-|   |-- llamafile-tokenize
 |   |-- llamafile-upgrade-engine
-|   |-- llamafiler
-|   |-- llava-quantize
-|   |-- localscore
-|   |-- sdfile
+|   |-- mic2raw
+|   |-- mic2txt
+|   |-- stream
+|   |-- whisper-server
 |   |-- whisperfile
 |   `-- zipalign
-`-- share
-    |-- doc
-    |   `-- llamafile
-    |       |-- llamafile-imatrix.pdf
-    |       |-- llamafile-perplexity.pdf
-    |       |-- llamafile-quantize.pdf
-    |       |-- llamafile.pdf
-    |       |-- llamafiler.pdf
-    |       |-- llava-quantize.pdf
-    |       |-- whisperfile.pdf
-    |       `-- zipalign.pdf
-    `-- man
-        `-- man1
-            |-- llamafile-imatrix.1
-            |-- llamafile-perplexity.1
-            |-- llamafile-quantize.1
-            |-- llamafile.1
-            |-- llamafiler.1
-            |-- llava-quantize.1
-            |-- whisperfile.1
-            `-- zipalign.1
 ```
 
 Before you zip the directory, you will want to remove the shared libraries from the directory.
@@ -122,20 +88,8 @@ You can zip the directory with the following command:
 
 ### Llamafile Release Binaries
 
-After you have built the zip it is quite easy to create the release binaries.
+The release binaries are the files staged into `<preferred_dir>/llamafile-<version>/bin` by `make install`.
 
-The following binaries are part of the release:
-
-- `llamafile`
-- `llamafile-bench`
-- `llamafiler`
-- `sdfile`
-- `localscore`
-- `whisperfile`
-- `zipalign`
-
-You can use the script to create the appropriately named binaries:
-
-`./llamafile/release.sh -v <version> -s <source_dir> -d <dest_dir>`
-
-Make sure to move the llamafile-<version>.zip file to the <dest_dir> as well, and you are good to release after you've tested.
+At minimum, upload the binaries you want to support from that directory together with `llamafile-<version>.zip`.
+If you also built platform-specific GPU shared libraries, bundle them into the corresponding binaries with `zipalign`
+before uploading the release artifacts.

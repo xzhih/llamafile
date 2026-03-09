@@ -45,7 +45,7 @@
 
 // Version string - should be defined by build system
 #ifndef LLAMAFILE_VERSION_STRING
-#define LLAMAFILE_VERSION_STRING "0.10.2-dev"
+#define LLAMAFILE_VERSION_STRING "0.10.4-dev"
 #endif
 
 namespace lf {

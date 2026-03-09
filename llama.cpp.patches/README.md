@@ -98,14 +98,10 @@ These patches integrate llamafile's file handling APIs for loading models from b
 
 | Patch | Description |
 |-------|-------------|
-| `vendor_miniaudio_miniaudio.h.patch` | Removes `__COSMOPOLITAN__` from Windows platform detection (Cosmopolitan handles this at runtime) |
-
 ### Miscellaneous
 
 | Patch | Description |
 |-------|-------------|
-| `common_chat.cpp.patch` | Fixes C++ type conversion: explicitly wraps `inputs.messages` in `std::optional<json>()` for Deepseek v3.1 template |
-
 ## Creating New Patches
 
 Files in `llama.cpp` are usually modified in-place for development and testing.
