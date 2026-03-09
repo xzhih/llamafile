@@ -177,8 +177,8 @@ int main(int argc, char **argv) {
     }
 
     // Adjust context size
-    // Translate mode usually operates on short requests; using train context
-    // length by default can dramatically increase startup latency.
+    // Translate mode should handle longer text requests out of the box
+    // without paying the full train-context startup cost by default.
     if (g_translate_options.enabled && g_params->n_ctx <= 0) {
         g_params->n_ctx = 16384;
     }
