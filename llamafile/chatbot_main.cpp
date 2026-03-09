@@ -180,7 +180,7 @@ int main(int argc, char **argv) {
     // Translate mode usually operates on short requests; using train context
     // length by default can dramatically increase startup latency.
     if (g_translate_options.enabled && g_params->n_ctx <= 0) {
-        g_params->n_ctx = g_translate_options.image_mode ? 16384 : 4096;
+        g_params->n_ctx = 16384;
     }
     if (g_params->n_ctx <= 0 || g_params->n_ctx > (int)llama_model_n_ctx_train(g_model))
         g_params->n_ctx = llama_model_n_ctx_train(g_model);
